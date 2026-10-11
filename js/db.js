@@ -4,13 +4,13 @@
 //  - DriverNuvem: Firebase Firestore, que também guarda uma cópia no aparelho e funciona sem internet
 import { novoId } from './util.js';
 
-export const COLECOES = ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo'];
+export const COLECOES = ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo', 'cadastros'];
 
 // Ligadas à página de pedidos dos clientes. Precisam das regras novas do Firebase; enquanto elas não
 // forem publicadas, o app segue normal e só a tela de pedidos avisa.
-const COLECOES_DA_PAGINA = ['pedidos', 'catalogo'];
-// O catálogo é aberto ao público: nada de e-mail de quem cadastrou.
-const PUBLICAS = ['catalogo'];
+const COLECOES_DA_PAGINA = ['pedidos', 'catalogo', 'cadastros'];
+// Os clientes leem estas na página de pedidos: nada de e-mail de quem cadastrou.
+const SEM_AUTOR = ['catalogo', 'cadastros'];
 
 // Ao abrir o app na nuvem, pede de novo ao servidor tudo que mudou desde
 // (última alteração conhecida - 1 dia), para cobrir relógios um pouco errados.
@@ -36,6 +36,7 @@ class Banco {
     this.papel = null;
     this.pendentes = 0;
     this.semPermissao = new Set(); // coleções que o Firebase ainda não deixa ler
+    this.prontas = new Set(); // coleções que já vieram do servidor (não só da cópia no aparelho)
     this.online = typeof navigator === 'undefined' ? true : navigator.onLine;
     this.aoErro = (e) => console.error(e);
     this._agendado = false;
@@ -88,7 +89,7 @@ class Banco {
     const agora = Math.max(Date.now(), (anterior?.atualizadoEm || 0) + 1);
     const doc = semIndefinidos({ ...anterior, ...dados, id: dados.id || novoId(), atualizadoEm: agora });
     if (!doc.criadoEm) doc.criadoEm = agora;
-    if (!anterior && this.usuario?.email && !PUBLICAS.includes(col)) doc.criadoPor = this.usuario.email;
+    if (!anterior && this.usuario?.email && !SEM_AUTOR.includes(col)) doc.criadoPor = this.usuario.email;
     this.dados[col].set(doc.id, doc);
     this.avisar();
     this._acompanhar(this.driver.gravar(col, doc));
@@ -118,6 +119,7 @@ class Banco {
     this.modo = modo;
     for (const c of COLECOES) this.dados[c].clear();
     this.semPermissao.clear();
+    this.prontas.clear();
     await driver.iniciar(this);
     this.avisar();
   }
@@ -125,6 +127,7 @@ class Banco {
   parar() {
     this.driver?.parar?.();
     for (const c of COLECOES) this.dados[c].clear();
+    this.prontas.clear();
     this.avisar();
   }
 
@@ -239,7 +242,7 @@ export class DriverNuvem {
       try {
         const snap = await getDocsFromCache(ref);
         snap.forEach((d) => {
-          const x = d.data();
+          const x = { id: d.id, ...d.data() };
           banco.aplicar(col, x);
           desde = Math.max(desde, x.atualizadoEm || 0);
         });
@@ -250,7 +253,15 @@ export class DriverNuvem {
       this.cancelar.push(
         onSnapshot(
           q,
-          (snap) => snap.docChanges().forEach((ch) => ch.type !== 'removed' && banco.aplicar(col, ch.doc.data())),
+          { includeMetadataChanges: true },
+          (snap) => {
+            // o id vem do caminho: o cadastro gravado pela página não tem o campo id
+            snap.docChanges().forEach((ch) => ch.type !== 'removed' && banco.aplicar(col, { id: ch.doc.id, ...ch.doc.data() }));
+            if (!snap.metadata.fromCache && !banco.prontas.has(col)) {
+              banco.prontas.add(col);
+              banco.avisar();
+            }
+          },
           (e) => {
             if (e.code === 'permission-denied' && COLECOES_DA_PAGINA.includes(col)) {
               console.warn(`Sem permissão para ${col}: publique as regras novas do Firestore.`);

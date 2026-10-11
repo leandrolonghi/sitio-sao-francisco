@@ -364,6 +364,7 @@ div.linha:active { background: transparent; }
 .entrega-topo strong { font-size: 18px; }
 .entrega-endereco { display: flex; gap: 6px; align-items: flex-start; margin: 10px 0 0 !important; font-weight: 600; }
 .entrega-endereco .icone { flex: none; margin-top: 2px; color: var(--verde); }
+.entrega-endereco .suave { font-weight: 400; }
 .entrega .botoes { margin-top: 12px; }
 .entrega-ver { display: inline-block; margin-top: 10px; font-weight: 600; }
 .pedido + .pedido { margin-top: 12px; }
@@ -379,7 +380,7 @@ div.linha:active { background: transparent; }
 .botao.loja-adicionar { flex: none; min-height: 40px; padding: 8px 14px; font-size: 15px; }
 .entrada-links { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 22px; }
 .entrada-links .botao { width: 100%; }
-.loja-endereco .entrega-endereco { margin: 8px 0 10px !important; }
+.cartao-endereco .entrega-endereco { margin: 8px 0 10px !important; }
 .com-barra .rodape-acao { bottom: calc(var(--barra) + env(safe-area-inset-bottom)); padding-bottom: 10px; }
 .com-barra .conteudo.com-rodape { padding-bottom: calc(var(--barra) + 150px + env(safe-area-inset-bottom)); }
 .dupla { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

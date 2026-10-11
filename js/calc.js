@@ -52,8 +52,9 @@ export function totalItens(itens = []) {
   return itens.reduce((s, i) => s + valorItem(i), 0);
 }
 
+// Itens, menos o desconto, mais o valor da entrega.
 export function totalVenda(venda) {
-  return Math.max(0, totalItens(venda.itens) - (venda.descontoCent || 0));
+  return Math.max(0, totalItens(venda.itens) - (venda.descontoCent || 0) + (venda.entregaCent || 0));
 }
 
 export function pagoVenda(venda) {

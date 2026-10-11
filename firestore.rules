@@ -6,6 +6,7 @@ rules_version = '2';
 // No app só entra quem confirmou o e-mail e foi liberado em "Pessoas com acesso" (ou é o responsável).
 // Na página de pedidos, qualquer um vê o catálogo; o cliente cadastrado (telefone e senha) vê e muda
 // só o próprio cadastro, faz pedidos e vê só os pedidos do próprio telefone.
+// O cadastro do cliente também aparece no app (Clientes), onde o sítio pode mudar nome e endereço.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -50,7 +51,7 @@ service cloud.firestore {
     function pedidoNovo(id) {
       let d = request.resource.data;
       let agora = request.time.toMillis();
-      return d.keys().hasOnly(['id', 'nome', 'telefone', 'entrega', 'endereco', 'dataDesejada', 'itens', 'totalCent', 'obs', 'status', 'criadoEm', 'atualizadoEm'])
+      return d.keys().hasOnly(['id', 'nome', 'telefone', 'entrega', 'endereco', 'dataDesejada', 'itens', 'entregaCent', 'totalCent', 'obs', 'status', 'criadoEm', 'atualizadoEm'])
         && d.keys().hasAll(['id', 'nome', 'telefone', 'entrega', 'itens', 'status', 'criadoEm', 'atualizadoEm'])
         && d.id == id
         && d.status == 'novo'
@@ -63,11 +64,14 @@ service cloud.firestore {
         && textoOpcional(d, 'endereco', 300)
         && textoOpcional(d, 'obs', 500)
         && textoOpcional(d, 'dataDesejada', 10)
-        && (!('totalCent' in d) || d.totalCent == null || d.totalCent is int);
+        && (!('totalCent' in d) || d.totalCent == null || d.totalCent is int)
+        && (!('entregaCent' in d) || d.entregaCent == null || d.entregaCent is int);
     }
 
+    // Cadastro gravado pela página: só os campos esperados e a hora certa.
     function cadastroValido(tel) {
       let d = request.resource.data;
+      let agora = request.time.toMillis();
       return d.keys().hasOnly(['telefone', 'nome', 'endereco', 'bairro', 'cidade', 'referencia', 'criadoEm', 'atualizadoEm'])
         && d.telefone == tel
         && d.nome is string && d.nome.size() >= 2 && d.nome.size() <= 80
@@ -75,7 +79,8 @@ service cloud.firestore {
         && textoOpcional(d, 'bairro', 100)
         && textoOpcional(d, 'cidade', 100)
         && textoOpcional(d, 'referencia', 200)
-        && d.criadoEm is int && d.atualizadoEm is int;
+        && d.criadoEm is int && d.atualizadoEm is int
+        && d.atualizadoEm > agora - 43200000 && d.atualizadoEm < agora + 3600000;
     }
 
     match /membros/{mail} {
@@ -85,7 +90,7 @@ service cloud.firestore {
 
     match /{colecao}/{id} {
       allow read, write: if (responsavel() || membro())
-        && colecao in ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo'];
+        && colecao in ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo', 'cadastros'];
     }
 
     // Página de pedidos: produtos que o sítio escolheu mostrar.
@@ -94,6 +99,7 @@ service cloud.firestore {
     }
 
     // Página de pedidos: cadastro do cliente (nome e endereço), guardado pelo telefone.
+    // O app também lê e muda (regra de cima), para o cadastro ser o mesmo nos dois.
     match /cadastros/{tel} {
       allow read: if responsavel() || membro() || (cliente() && tel == telefoneDoCliente());
       allow create, update: if cliente() && tel == telefoneDoCliente() && cadastroValido(tel);

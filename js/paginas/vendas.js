@@ -2,15 +2,17 @@ import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { pode, podeAbrir } from '../estado.js';
 import {
-  FORMAS_PAGAMENTO, totalVenda, totalItens, pagoVenda, saldoVenda, statusVenda, ROTULO_STATUS, valorItem, situacaoVencimento,
+  FORMAS_PAGAMENTO, totalVenda, pagoVenda, saldoVenda, statusVenda, ROTULO_STATUS, valorItem, situacaoVencimento,
 } from '../calc.js';
 import { dinheiro, qtd, hoje, addDias, dataAmigavel, dataBR, dataCurta, periodo, entre, contem, novoId, linkWhatsApp, arred3, plural } from '../util.js';
 import {
   Tela, Secao, Lista, Linha, Etiqueta, Vazio, Botao, BotaoTopo, Icone, CampoData, Seletor, Segmentado, Escolha,
-  CampoDinheiro, EntradaDinheiro, EntradaQtd, AreaTexto, Texto, Interruptor, Folha, avisar, trocar, voltar, confirmar,
+  CampoDinheiro, EntradaDinheiro, EntradaQtd, AreaTexto, Interruptor, Folha, CamposEndereco, CartaoEndereco, avisar, trocar, voltar, confirmar,
 } from '../ui.js';
-import { enderecoDaVenda, marcarEntrega, BotoesMapa, SemEndereco } from './entregas.js';
-import { dadosDoPedido, mudarPedido } from './pedidos.js';
+import { camposEndereco, mesmoEndereco, enderecoCompleto, textoOuNulo, CAMPOS_ENDERECO } from '../loja-comum.js';
+import { salvarCliente } from '../cadastros.js';
+import { enderecoDaVenda, marcarEntrega, BotoesMapa, SemEndereco, EnderecoEntrega } from './entregas.js';
+import { dadosDoPedido, mudarPedido, infoLoja } from './pedidos.js';
 import {
   itensClientes, novoCliente, produtosAtivos, nomeVenda, NaoEncontrado, ultimaForma, guardarForma, saldoCliente,
   nomeDoSitio, estoqueAtual,
@@ -98,6 +100,13 @@ function CampoVencimento({ valor, data, onChange, erro }) {
   </div>`;
 }
 
+// Endereço para a entrega: o do cliente, ou o que veio no pedido se for outro.
+function enderecoInicial(cliente, pedido) {
+  const doCliente = camposEndereco(cliente);
+  if (pedido?.endereco && pedido.endereco !== enderecoCompleto(doCliente)) return { ...camposEndereco(null), endereco: pedido.endereco, referencia: doCliente.referencia };
+  return doCliente;
+}
+
 export function FormVenda({ id, query = {} }) {
   const existente = id ? banco.get('vendas', id) : null;
   // venda feita a partir de um pedido da página de pedidos
@@ -115,20 +124,28 @@ export function FormVenda({ id, query = {} }) {
   const [vencimento, setVencimento] = useState(existente?.vencimento || '');
   const [entregar, setEntregar] = useState(existente ? !!existente.entrega : pedido?.entrega === 'entregar');
   const [dataEntrega, setDataEntrega] = useState(existente?.entrega?.data || existente?.data || (pedido?.dataDesejada > hoje() ? pedido.dataDesejada : hoje()));
-  const [endereco, setEndereco] = useState(() => pedido?.endereco || banco.get('clientes', existente?.clienteId || query.cliente)?.endereco || '');
+  const [end, setEnd] = useState(() => enderecoInicial(banco.get('clientes', existente?.clienteId || query.cliente), pedido));
+  const [mudandoEndereco, setMudandoEndereco] = useState(false);
+  // valor da entrega: o da venda, o do pedido ou o padrão dos ajustes da página de pedidos
+  const [entregaCent, setEntregaCent] = useState(() => (existente ? existente.entregaCent : pedido ? pedido.entregaCent : infoLoja().taxaEntregaCent) || null);
   const [erros, setErros] = useState({});
   if (id && !existente) return html`<${NaoEncontrado} voltarPara="/vendas" />`;
 
   const produtos = produtosAtivos();
   const estoque = estoqueAtual();
-  const total = Math.max(0, totalItens(itens) - (descontoCent || 0));
+  const total = totalVenda({ itens, descontoCent, entregaCent: entregar ? entregaCent : 0 });
   const recebido = comoPaga === 'agora' ? Math.min(recebidoCent ?? total, total) : 0;
   const falta = total - recebido;
   const ficaDevendo = existente ? total - pagoVenda(existente) > 0 : falta > 0;
   const escolherCliente = (v) => {
     setClienteId(v);
-    setEndereco(banco.get('clientes', v)?.endereco || '');
+    setEnd(camposEndereco(banco.get('clientes', v)));
+    setMudandoEndereco(false);
     setErros({ ...erros, cliente: null });
+  };
+  const mudarEndereco = (campo) => (v) => {
+    setEnd((e) => ({ ...e, [campo]: v }));
+    setErros((e) => ({ ...e, endereco: null }));
   };
 
   const mudarItem = (chave, mudanca) => setItens((lista) => lista.map((i) => (i.chave === chave ? { ...i, ...mudanca } : i)));
@@ -150,15 +167,20 @@ export function FormVenda({ id, query = {} }) {
     if (!clienteId) e.cliente = 'Escolha o cliente.';
     if (ficaDevendo && !vencimento) e.vencimento = 'Escolha a data combinada para o pagamento.';
     else if (ficaDevendo && vencimento < data) e.vencimento = 'A data de pagamento não pode ser antes da venda.';
-    if (entregar && !endereco.trim()) e.endereco = 'Coloque o endereço para a entrega.';
+    if (entregar && !enderecoCompleto(end)) {
+      e.endereco = 'Coloque o endereço para a entrega.';
+      setMudandoEndereco(true);
+    }
     setErros(e);
     if (Object.keys(e).length) {
       avisar(Object.values(e)[0], 'erro');
       return;
     }
     const cliente = banco.get('clientes', clienteId);
-    // o endereço da entrega fica no cadastro do cliente
-    if (entregar && cliente && endereco.trim() !== (cliente.endereco || '')) banco.salvar('clientes', { ...cliente, endereco: endereco.trim() });
+    // o endereço da entrega fica no cadastro do cliente (e na página de pedidos, se ele tem cadastro lá)
+    if (entregar && cliente && !mesmoEndereco(end, camposEndereco(cliente))) {
+      salvarCliente({ ...cliente, ...Object.fromEntries(CAMPOS_ENDERECO.map((k) => [k, textoOuNulo(end[k])])) });
+    }
     const limpos = itens.map(({ chave, ...i }) => ({ ...i, nome: i.nome?.trim() || 'Item', qtd: arred3(i.qtd) }));
     let pagamentos = existente?.pagamentos || [];
     if (!existente && comoPaga === 'agora' && recebido > 0) {
@@ -172,6 +194,7 @@ export function FormVenda({ id, query = {} }) {
       clienteNome: cliente?.nome || null,
       itens: limpos,
       descontoCent: descontoCent || 0,
+      entregaCent: entregar && entregaCent > 0 ? entregaCent : null,
       totalCent: total,
       pagamentos,
       obs: obs.trim() || null,
@@ -292,14 +315,13 @@ export function FormVenda({ id, query = {} }) {
         <${Interruptor} rotulo="Entregar no endereço do cliente" dica="A venda aparece na aba Entregas" valor=${entregar} onChange=${setEntregar} />
         ${entregar
           ? html`<${CampoData} rotulo="Entregar em" valor=${dataEntrega} onChange=${setDataEntrega} />
-              <${Texto}
-                rotulo="Endereço"
-                valor=${endereco}
-                onChange=${(v) => (setEndereco(v), setErros({ ...erros, endereco: null }))}
-                placeholder="Rua, número, bairro, cidade"
-                dica="Fica salvo no cadastro do cliente"
-                erro=${erros.endereco}
-              />`
+              ${!mudandoEndereco && enderecoCompleto(end)
+                ? html`<${CartaoEndereco} rotulo="Endereço" texto=${enderecoCompleto(end)} referencia=${end.referencia} onMudar=${() => setMudandoEndereco(true)} />`
+                : html`<${CamposEndereco} dados=${end} mudarCampo=${mudarEndereco} erros=${{ endereco: erros.endereco }} />
+                    <p class="campo-dica" style="margin:0">
+                      Fica salvo no cadastro do cliente${banco.get('clientes', clienteId)?.cadastro ? ' e aparece para ele na página de pedidos' : ''}.
+                    </p>`}
+              <${CampoDinheiro} rotulo="Valor da entrega" valor=${entregaCent} onChange=${setEntregaCent} dica="Soma no total da venda. Em branco, não cobra." />`
           : ''}
       </div>
     </${Secao}>
@@ -314,6 +336,7 @@ function textoComprovante(v) {
   const linhas = [`*${nomeDoSitio()}*`, `Venda de ${dataBR(v.data)}${v.clienteId ? ' para ' + nomeVenda(v) : ''}`, ''];
   for (const i of v.itens || []) linhas.push(`• ${i.nome}: ${qtd(i.qtd)} ${i.unidade || ''} x ${dinheiro(i.precoCent)} = ${dinheiro(valorItem(i))}`);
   if (v.descontoCent) linhas.push(`Desconto: -${dinheiro(v.descontoCent)}`);
+  if (v.entregaCent) linhas.push(`Entrega: ${dinheiro(v.entregaCent)}`);
   linhas.push('', `*Total: ${dinheiro(totalVenda(v))}*`);
   const pago = pagoVenda(v);
   if (pago > 0) linhas.push(`Pago: ${dinheiro(pago)}`);
@@ -419,6 +442,7 @@ export function DetalheVenda({ id }) {
           />`,
         )}
         ${v.descontoCent ? html`<${Linha} titulo="Desconto" direita=${'- ' + dinheiro(v.descontoCent)} />` : ''}
+        ${v.entregaCent ? html`<${Linha} titulo="Entrega" direita=${dinheiro(v.entregaCent)} />` : ''}
       </${Lista}>
     </${Secao}>
 
@@ -440,7 +464,7 @@ export function DetalheVenda({ id }) {
               <span>${v.entrega.feita ? `Entregue ${dataAmigavel(v.entrega.feitaEm)}` : `Entregar ${dataAmigavel(v.entrega.data || v.data)}`}</span>
               <${Etiqueta} tipo=${v.entrega.feita ? 'ok' : 'info'}>${v.entrega.feita ? 'Entregue' : 'A entregar'}</${Etiqueta}>
             </div>
-            ${endereco ? html`<p class="entrega-endereco"><${Icone} nome="map-pin" tam=${18} /><span>${endereco}</span></p>` : html`<${SemEndereco} venda=${v} />`}
+            ${endereco ? html`<${EnderecoEntrega} v=${v} endereco=${endereco} />` : html`<${SemEndereco} venda=${v} />`}
             <div class="botoes">
               ${endereco && !v.entrega.feita ? html`<${BotoesMapa} endereco=${endereco} />` : ''}
               <${Botao} tipo="secundario" icone=${v.entrega.feita ? 'refresh-cw' : 'check'} onClick=${() => marcarEntrega(v, !v.entrega.feita)}>

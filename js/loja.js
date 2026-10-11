@@ -5,9 +5,12 @@ import { html, render, useState, useEffect } from './vendor/preact.js';
 import { firebaseConfig } from '../config.js';
 import { conectar } from './firestore-rest.js';
 import { criarConta } from './loja-conta.js';
-import { Tela, Secao, Botao, Texto, AreaTexto, CampoData, Segmentado, EntradaQtd, Etiqueta, Icone, Vazio, Avisos, avisar, useRota, trocar, confirmar } from './ui.js';
+import {
+  Tela, Secao, Botao, Texto, AreaTexto, CampoData, Segmentado, EntradaQtd, Etiqueta, Icone, Vazio, Avisos, CamposEndereco, CartaoEndereco,
+  avisar, useRota, trocar, confirmar,
+} from './ui.js';
 import { dinheiro, qtd, hoje, dataAmigavel, dataBR, formatarTelefone, novoId, linkWhatsApp, arred3, plural } from './util.js';
-import { INFO_LOJA, STATUS_PEDIDO, telefoneNormal, pinValido, enderecoCompleto } from './loja-comum.js';
+import { INFO_LOJA, STATUS_PEDIDO, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco, textoOuNulo } from './loja-comum.js';
 
 // ---------- Estado da página ----------
 
@@ -125,7 +128,8 @@ async function lerCadastro() {
   mudar({ lendoCadastro: !loja.cliente, erroCadastro: '' });
   try {
     const cad = await loja.db.ler('cadastros/' + tel);
-    if (loja.sessao?.telefone === tel) mudar({ cliente: cad ? { ...cad, id: undefined } : null });
+    // o sítio pode ter apagado o cliente no app: aí o cadastro some e a pessoa preenche de novo
+    if (loja.sessao?.telefone === tel) mudar({ cliente: cad?.nome && !cad.excluido ? { ...cad, id: undefined } : null });
   } catch (e) {
     console.error(e);
     if (loginPerdido(e)) return sairDaConta('Entre de novo com seu telefone e senha.');
@@ -134,8 +138,6 @@ async function lerCadastro() {
     mudar({ lendoCadastro: false });
   }
 }
-
-const textoOuNulo = (t) => (t || '').trim().replace(/\s+/g, ' ') || null;
 
 async function salvarCadastro(dados) {
   const agora = Date.now();
@@ -147,7 +149,8 @@ async function salvarCadastro(dados) {
     cidade: textoOuNulo(dados.cidade),
     referencia: textoOuNulo(dados.referencia),
     criadoEm: loja.cliente?.criadoEm || agora,
-    atualizadoEm: agora,
+    // sempre depois da última mudança (que pode ter sido do sítio, no app), para o app saber que é nova
+    atualizadoEm: Math.max(agora, Math.min((loja.cliente?.atualizadoEm || 0) + 1, agora + 30 * 60000)),
   };
   await loja.db.gravar('cadastros/' + doc.telefone, doc);
   mudar({ cliente: doc });
@@ -223,15 +226,6 @@ function CampoSenha({ valor, onChange, erro, nova }) {
     autocomplete=${nova ? 'new-password' : 'current-password'}
     dica=${nova ? 'Você vai usar o telefone e esta senha para entrar.' : null}
   />`;
-}
-
-function CamposEndereco({ dados, mudarCampo, erros = {} }) {
-  return html`
-    <${Texto} rotulo="Endereço (rua e número)" valor=${dados.endereco} onChange=${mudarCampo('endereco')} placeholder="Rua das Flores, 10" erro=${erros.endereco} autocomplete="address-line1" />
-    <${Texto} rotulo="Bairro" valor=${dados.bairro} onChange=${mudarCampo('bairro')} erro=${erros.bairro} />
-    <${Texto} rotulo="Cidade" valor=${dados.cidade} onChange=${mudarCampo('cidade')} erro=${erros.cidade} autocomplete="address-level2" />
-    <${Texto} rotulo="Ponto de referência (opcional)" valor=${dados.referencia} onChange=${mudarCampo('referencia')} placeholder="Ex.: portão verde, perto da igreja" />
-  `;
 }
 
 function errosDoCadastro(d) {
@@ -475,9 +469,6 @@ function Catalogo() {
   </${Tela}>`;
 }
 
-const camposEndereco = (c) => ({ endereco: c?.endereco || '', bairro: c?.bairro || '', cidade: c?.cidade || '', referencia: c?.referencia || '' });
-const mesmoEndereco = (a, b) => ['endereco', 'bairro', 'cidade', 'referencia'].every((k) => (a[k] || '').trim() === (b[k] || '').trim());
-
 function Finalizar() {
   const { cliente, info } = useLoja();
   const itens = itensDoCarrinho();
@@ -493,9 +484,11 @@ function Finalizar() {
     if (!itens.length && location.hash.startsWith('#/finalizar')) trocar('/');
   });
   if (!itens.length) return null;
-  const total = totalItens(itens);
   const semPreco = itens.some((i) => i.precoCent == null);
   const entregar = entrega === 'entregar';
+  // valor da entrega que o sítio cobra (nos ajustes da página, no app)
+  const taxa = entregar && info.taxaEntregaCent > 0 ? info.taxaEntregaCent : 0;
+  const total = totalItens(itens) + taxa;
 
   const enviar = async () => {
     const er = {};
@@ -519,6 +512,7 @@ function Finalizar() {
       endereco: entregar ? enderecoCompleto(end.dados) : null,
       dataDesejada: data || null,
       itens,
+      entregaCent: taxa || undefined,
       totalCent: total,
       obs: [obs.trim(), referencia].filter(Boolean).join('\n') || null,
       status: 'novo',
@@ -550,17 +544,14 @@ function Finalizar() {
     <div class="cartao pedido">
       <ul class="itens-pedido" style="margin-top:0">
         ${itens.map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade} ${i.nome}</span><span>${i.precoCent != null ? dinheiro(Math.round(i.qtd * i.precoCent)) : 'a combinar'}</span></li>`)}
+        ${taxa ? html`<li><span>Entrega</span><span>${dinheiro(taxa)}</span></li>` : ''}
         <li><strong>Total${semPreco ? ' (sem os itens a combinar)' : ''}</strong><strong>${dinheiro(total)}</strong></li>
       </ul>
       <p class="campo-dica">O sítio confirma o valor final.</p>
     </div>
     <${Segmentado} rotulo="Como quer receber?" valor=${entrega} onChange=${setEntrega} opcoes=${[['entregar', 'Entregar'], ['retirar', 'Retirar no sítio']]} />
     ${entregar && !mudandoEndereco
-      ? html`<div class="cartao loja-endereco">
-          <span class="campo-rotulo">Entregar em</span>
-          <p class="entrega-endereco"><${Icone} nome="map-pin" tam=${18} /><span>${enderecoCompleto(end.dados)}${end.dados.referencia ? html`<br /><span class="suave">${end.dados.referencia}</span>` : ''}</span></p>
-          <button type="button" class="link" onClick=${() => setMudandoEndereco(true)}>Mudar endereço</button>
-        </div>`
+      ? html`<${CartaoEndereco} rotulo="Entregar em" texto=${enderecoCompleto(end.dados)} referencia=${end.dados.referencia} onMudar=${() => setMudandoEndereco(true)} />`
       : ''}
     ${entregar && mudandoEndereco
       ? html`<${CamposEndereco} dados=${end.dados} mudarCampo=${end.mudarCampo} erros=${end.erros} />
@@ -619,7 +610,10 @@ function MeusPedidos() {
                   <strong>Pedido de ${dataAmigavel(dia)}</strong>
                   <${Etiqueta} tipo=${s.tipo}>${p.status === 'entregue' && p.entrega === 'retirar' ? 'Retirado' : s.nome}</${Etiqueta}>
                 </div>
-                <ul class="itens-pedido">${(p.itens || []).map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade} ${i.nome}</span></li>`)}</ul>
+                <ul class="itens-pedido">
+                  ${(p.itens || []).map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade} ${i.nome}</span></li>`)}
+                  ${p.entregaCent ? html`<li><span>Entrega</span><span>${dinheiro(p.entregaCent)}</span></li>` : ''}
+                </ul>
                 ${p.totalCent ? html`<p><strong>${p.status === 'novo' ? 'Total estimado' : 'Total'}: ${dinheiro(p.totalCent)}</strong></p>` : ''}
                 <p class="suave">${p.entrega === 'entregar' ? 'Entregar' : 'Retirar no sítio'}${p.dataDesejada ? ' · para ' + dataBR(p.dataDesejada) : ''}</p>
                 <p class="suave">${s.texto}</p>
@@ -721,9 +715,17 @@ async function iniciar() {
   render(html`<${Pagina} /><${Avisos} />`, raiz);
   carregarCatalogo();
   if (loja.sessao) {
-    lerCadastro(); // confere o cadastro (mudou em outro aparelho?)
+    lerCadastro(); // confere o cadastro (mudou em outro aparelho ou o sítio mudou no app?)
     carregarMeus(); // já deixa "Meus pedidos" pronto
   }
+  // o celular deixa a página aberta por dias: ao voltar para ela, busca de novo preços e cadastro
+  let ultimaVez = Date.now();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || Date.now() - ultimaVez < 60000) return;
+    ultimaVez = Date.now();
+    carregarCatalogo();
+    if (loja.sessao && loja.cliente) lerCadastro();
+  });
 }
 
 iniciar().catch((e) => {

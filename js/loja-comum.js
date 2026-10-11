@@ -39,3 +39,11 @@ export const enderecoCompleto = (c) =>
     .map((x) => (x || '').trim())
     .filter(Boolean)
     .join(', ');
+
+// O endereço é guardado em partes, igual no cadastro da página e no cliente do app.
+export const CAMPOS_ENDERECO = ['endereco', 'bairro', 'cidade', 'referencia'];
+export const camposEndereco = (c) => Object.fromEntries(CAMPOS_ENDERECO.map((k) => [k, c?.[k] || '']));
+export const mesmoEndereco = (a, b) => CAMPOS_ENDERECO.every((k) => (a?.[k] || '').trim() === (b?.[k] || '').trim());
+
+// Texto sem espaços sobrando (ou null, se ficou vazio).
+export const textoOuNulo = (t) => (t || '').trim().replace(/\s+/g, ' ') || null;

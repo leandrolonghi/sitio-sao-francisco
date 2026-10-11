@@ -6,8 +6,10 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 - **A receber (fiado)** por cliente, com data combinada para pagar, aviso do que passou da data, pagamento que quita
   primeiro as vendas mais antigas e cobrança pelo WhatsApp
 - **Entregas**: vendas marcadas para entregar, com o endereço do cadastro do cliente aberto no mapa (ou Waze)
-- **Página de pedidos** para os clientes: o cliente entra com nome e telefone, escolhe os produtos e acompanha
-  o pedido; no app o pedido vira venda (e entrega) com um toque
+- **Página de pedidos** para os clientes: o cliente faz um cadastro e entra com telefone e senha, escolhe os
+  produtos e acompanha o pedido; no app o pedido vira venda (e entrega) com um toque. O cadastro do cliente é o
+  mesmo na página e em Clientes no app
+- **Valor da entrega**: cobrado no pedido da página e na venda (dá para mudar em cada venda)
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
 - **Estoque e produção**: produção do dia, entradas, perdas, consumo e acerto de contagem; as vendas descontam sozinhas
 - **Produtos, clientes e fornecedores**
@@ -56,13 +58,20 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
 - **Esqueceu a senha:** o sítio apaga a conta do cliente no console do Firebase (Authentication → Usuários,
   procurar pelo telefone → Excluir conta) e o cliente faz o cadastro de novo com o mesmo telefone, sem perder
   os pedidos.
+- Quem se cadastra na página aparece em **Clientes** no app (se o sítio já tinha um cliente com o mesmo
+  telefone, ele fica ligado a esse, sem repetir). Nome e endereço são os mesmos dos dois lados: o que o cliente
+  muda na página aparece no app, e o que o sítio muda no app aparece na página. O telefone não muda no app (é o
+  login do cliente). Apagar o cliente no app apaga também o cadastro da página; na próxima vez, a pessoa preenche
+  de novo. Isso fica em `js/cadastros.js`.
 - Os produtos que aparecem são escolhidos em **Pedidos dos clientes → Produtos e ajustes da página** (ou no
-  cadastro do produto). Só vão para a página nome, unidade e preço. Lá também dá para fechar a página e colocar
-  o WhatsApp do sítio.
+  cadastro do produto). Só vão para a página nome, unidade e preço. Lá também dá para fechar a página, colocar
+  o WhatsApp do sítio e o **valor da entrega**, que soma no pedido quando o cliente escolhe Entregar. Na venda,
+  o valor da entrega vem preenchido (do pedido, ou o dos ajustes) e dá para mudar.
 - O pedido chega no app como **novo**; **Transformar em venda** abre a venda já preenchida e, ao registrar,
   o cliente vê **Confirmado**. Quando a entrega é marcada como feita, o cliente vê **Entregue**.
 - As regras do banco deixam quem não tem login só ver o catálogo. O cliente logado vê e muda só o próprio
-  cadastro, faz pedidos no próprio telefone (conferidos campo a campo) e vê só os pedidos dele.
+  cadastro, faz pedidos no próprio telefone (conferidos campo a campo) e vê só os pedidos dele. Quem usa o app
+  lê e muda os cadastros.
 
 ## Para quem for mexer no código
 
@@ -77,6 +86,7 @@ js/main.js                                início, login e rotas
 pedido/index.html, js/loja.js             página de pedidos dos clientes (js/loja-comum.js: o que ela e o app combinam)
 js/firestore-rest.js                      Firestore pela API REST, usado só pela página de pedidos (leve e rápido)
 js/loja-conta.js                          login dos clientes da página (Firebase Authentication pela API REST)
+js/cadastros.js                           cadastro da página de pedidos ligado ao cliente do app
 js/db.js                                  dados em memória + gravação local (IndexedDB) ou na nuvem (Firestore)
 js/calc.js                                regras: totais, fiado, estoque, relatórios
 js/util.js                                dinheiro, números e datas no padrão brasileiro

@@ -20,6 +20,8 @@ const telas = [];
 process.on('uncaughtException', async (e) => {
   console.error(e.message.split('\n')[0]);
   if (prints) for (const [nome, page] of telas) await page.screenshot({ path: `${prints}/falha-${nome}.png` }).catch(() => {});
+  for (const col of ['cadastros', 'clientes']) console.error(col + ': ' + JSON.stringify(await docsDoServidor(col).catch(() => [])));
+  for (const [nome, page] of telas) console.error(nome + ': ' + page.url());
   console.error('ERROS:\n' + erros.join('\n'));
   process.exit(1);
 });
@@ -102,7 +104,15 @@ async function aparelho(nome) {
     erros.push(`${nome} console: ${m.text()}`);
   });
   page.on('dialog', (d) => d.accept());
-  const foto = async (rot) => prints && page.screenshot({ path: `${prints}/p${String(++n).padStart(2, '0')}-${nome}-${rot}.png` });
+  // a tela inteira, com a barra de baixo no fim (como se o celular fosse bem comprido)
+  const foto = async (rot) => {
+    if (!prints) return;
+    const tam = page.viewportSize();
+    const altura = await page.evaluate(() => document.documentElement.scrollHeight);
+    await page.setViewportSize({ width: tam.width, height: Math.max(tam.height, altura) });
+    await page.screenshot({ path: `${prints}/p${String(++n).padStart(2, '0')}-${nome}-${rot}.png` });
+    await page.setViewportSize(tam);
+  };
   const esperar = (t, timeout = 10000) => page.getByText(t, { exact: false }).first().waitFor({ timeout });
   return { ctx, page, foto, esperar };
 }
@@ -133,7 +143,15 @@ await novoProduto('Ovos caipira', '16', true);
 await novoProduto('Mel', '30', false);
 await novoProduto('Queijo', '45', false);
 
-passo('dono abre Pedidos, coloca o Mel na página e o WhatsApp do sítio');
+passo('dono já tinha o Pedro em Clientes (cadastrado à mão)');
+await dono.page.goto(base + '#/clientes/novo');
+await dono.page.getByLabel('Nome').fill('Pedro');
+await dono.page.getByLabel('Telefone / WhatsApp').fill('(11) 91111-2222');
+await dono.page.getByLabel('Observação').fill('cliente antigo');
+await dono.page.click('text=Salvar');
+await dono.esperar('cliente antigo');
+
+passo('dono abre Pedidos, coloca o Mel na página, o WhatsApp do sítio e o valor da entrega');
 await dono.page.goto(base + '#/mais');
 await dono.page.click('text=Pedidos dos clientes');
 await dono.esperar('Nenhum pedido novo');
@@ -143,6 +161,7 @@ await dono.page.click('text=Produtos e ajustes da página');
 await dono.esperar('Produtos que aparecem na página');
 await dono.page.locator('.interruptor-linha', { hasText: 'Mel' }).click();
 await dono.page.getByLabel('WhatsApp do sítio').fill('(19) 97777-6666');
+await dono.page.getByLabel('Valor da entrega').fill('5');
 await dono.foto('ajustes-pagina');
 await dono.page.click('text=Salvar');
 await dono.esperar('Página de pedidos atualizada');
@@ -179,6 +198,17 @@ await cliente.esperar('Olá, Ana!');
 let [cadastro] = await docsDoServidor('cadastros');
 conferir(cadastro?.telefone === '19988887777' && cadastro.bairro === 'Centro' && cadastro.referencia === 'Portão verde', 'cadastro no servidor: ' + JSON.stringify(cadastro));
 
+passo('o cadastro da Ana aparece em Clientes no app, antes de qualquer pedido');
+await dono.page.goto(base + '#/clientes');
+await dono.esperar('Ana Souza', 15000);
+await dono.page.click('text=Ana Souza');
+await dono.esperar('Rua das Flores, 10, Centro, Campinas');
+await dono.esperar('Tem cadastro na página de pedidos');
+await dono.foto('cliente-da-pagina');
+const doServidor = async (col, f) => (await docsDoServidor(col)).filter(f);
+let [ana] = await doServidor('clientes', (k) => k.cadastro === '19988887777');
+conferir(ana?.id === 'tel19988887777' && ana.referencia === 'Portão verde' && !ana.excluido, 'cliente da Ana no app: ' + JSON.stringify(ana));
+
 passo('cliente vê só os produtos escolhidos');
 await cliente.esperar('Ovos caipira');
 await cliente.esperar('R$ 30,00 / ');
@@ -193,6 +223,8 @@ passo('cliente pede para entregar: o endereço já vem do cadastro');
 await cliente.page.click('text=Continuar');
 await cliente.esperar('Como quer receber?');
 await cliente.esperar('Rua das Flores, 10, Centro, Campinas');
+await cliente.esperar('Entrega');
+await cliente.esperar('R$ 37,00');
 conferir(!(await cliente.page.getByLabel('Bairro').count()), 'pediu o endereço de novo em vez de usar o do cadastro');
 await cliente.page.getByLabel('Observação').fill('Deixar no portão');
 await cliente.foto('finalizar');
@@ -217,6 +249,7 @@ await dono.esperar('Ana Souza');
 await dono.esperar('Rua das Flores, 10, Centro, Campinas');
 await dono.esperar('Deixar no portão');
 await dono.esperar('Ponto de referência: Portão verde');
+await dono.esperar('Total estimado: R$ 37,00');
 await dono.foto('pedido-novo');
 
 passo('dono transforma o pedido em venda');
@@ -224,20 +257,24 @@ await dono.page.click('text=Transformar em venda');
 await dono.esperar('Venda do pedido');
 await dono.esperar('R$ 32,00');
 conferir((await dono.page.locator('.seletor-botao').first().innerText()).includes('Ana Souza'), 'cliente não veio preenchido na venda');
-conferir((await dono.page.getByPlaceholder('Rua, número, bairro, cidade').inputValue()).includes('Rua das Flores'), 'endereço não veio preenchido na venda');
+await dono.esperar('Rua das Flores, 10, Centro, Campinas');
+conferir((await dono.page.getByLabel('Valor da entrega').inputValue()) === '5,00', 'valor da entrega não veio do pedido');
+await dono.esperar('R$ 37,00');
 await dono.foto('venda-do-pedido');
 await dono.page.click('text=Registrar venda');
 await dono.esperar('Pedido confirmado e venda registrada');
 await dono.page.waitForTimeout(1500);
 let [pedido] = await docsDoServidor('pedidos');
-conferir(pedido?.status === 'confirmado' && pedido.vendaId && pedido.totalCent === 3200, 'pedido depois da venda: ' + JSON.stringify(pedido));
+conferir(pedido?.status === 'confirmado' && pedido.vendaId && pedido.totalCent === 3700 && pedido.entregaCent === 500, 'pedido depois da venda: ' + JSON.stringify(pedido));
+const [venda] = await docsDoServidor('vendas');
+conferir(venda?.entregaCent === 500 && venda.totalCent === 3700, 'venda com a entrega: ' + JSON.stringify(venda));
 const clientes = await docsDoServidor('clientes');
-conferir(clientes.length === 1 && clientes[0].telefone === '19988887777' && clientes[0].endereco?.includes('Rua das Flores'), 'cliente criado: ' + JSON.stringify(clientes));
+conferir(clientes.length === 2 && clientes.filter((k) => k.cadastro === '19988887777').length === 1, 'clientes depois da venda: ' + JSON.stringify(clientes));
 
 passo('cliente vê o pedido confirmado');
 await cliente.page.click('text=Atualizar');
 await cliente.esperar('Confirmado');
-await cliente.esperar('Total: R$ 32,00');
+await cliente.esperar('Total: R$ 37,00');
 await cliente.foto('meus-confirmado');
 
 passo('dono entrega e o cliente vê entregue');
@@ -250,6 +287,18 @@ await dono.page.waitForTimeout(1500);
 conferir(pedido?.status === 'entregue', 'pedido depois da entrega: ' + pedido?.status);
 await cliente.page.click('text=Atualizar');
 await cliente.esperar('Entregue');
+
+passo('dono muda o cadastro da Ana no app e muda na página também');
+await dono.page.goto(base + '#/clientes/tel19988887777/editar');
+await dono.esperar('O nome e o endereço que você mudar aqui aparecem para o cliente lá');
+conferir(!(await dono.page.getByLabel('Telefone / WhatsApp').count()), 'telefone de quem tem cadastro na página não deveria mudar no app');
+await dono.page.getByLabel('Ponto de referência').fill('Portão azul');
+await dono.foto('editar-cliente-da-pagina');
+await dono.page.click('text=Salvar');
+await dono.esperar('Alterações salvas');
+await dono.page.waitForTimeout(1500);
+[cadastro] = await docsDoServidor('cadastros');
+conferir(cadastro?.referencia === 'Portão azul' && cadastro.nome === 'Ana Souza' && !('criadoPor' in cadastro), 'cadastro depois de mudar no app: ' + JSON.stringify(cadastro));
 
 passo('segundo pedido, para retirar, é recusado');
 await cliente.page.click('.abas >> text=Fazer pedido');
@@ -319,7 +368,7 @@ await cliente2.page.locator('.loja-produto', { hasText: 'Ovos caipira' }).locato
 await cliente2.page.click('text=Continuar');
 await cliente2.esperar('Entregar em');
 await cliente2.esperar('Rua das Flores, 10, Centro, Campinas');
-await cliente2.esperar('Portão verde');
+await cliente2.esperar('Portão azul');
 await cliente2.foto('endereco-pronto');
 await cliente2.page.click('text=Mudar endereço');
 await cliente2.page.getByLabel('Bairro').fill('Jardim Novo');
@@ -333,6 +382,11 @@ conferir(pedidosAna.some((p) => p.endereco === 'Rua das Flores, 10, Jardim Novo,
 await cliente2.page.click('text=Ver meus pedidos');
 await cliente2.esperar('Não aceito');
 conferir((await cliente2.page.locator('.cartao.pedido').count()) === 3, 'no outro celular deveria ver os 3 pedidos');
+
+passo('o endereço que a Ana mudou na página aparece no app');
+await dono.page.goto(base + '#/clientes/tel19988887777');
+await dono.esperar('Rua das Flores, 10, Jardim Novo, Campinas', 15000);
+await dono.esperar('Portão azul');
 
 passo('outro cliente não vê os pedidos nem o cadastro da Ana');
 await cliente.page.click('text=Já tenho cadastro');
@@ -348,12 +402,19 @@ await cliente.esperar('Olá, Pedro!');
 await cliente.page.click('.abas >> text=Meus pedidos');
 await cliente.esperar('Você ainda não fez pedidos');
 
+passo('o Pedro que o dono já tinha fica ligado ao cadastro, sem repetir');
+await dono.page.goto(base + '#/clientes');
+await dono.esperar('Pedro Lima', 15000);
+await dono.page.waitForTimeout(500);
+const pedros = await doServidor('clientes', (k) => (k.telefone || '').replace(/\D/g, '').endsWith('911112222'));
+conferir(pedros.length === 1 && pedros[0].cadastro === '11911112222' && pedros[0].obs === 'cliente antigo' && pedros[0].bairro === 'Vila Nova', 'Pedro em Clientes: ' + JSON.stringify(pedros));
+
 passo('as regras bloqueiam o que não é de cada um');
 const umPedido = pedidosAna[0];
 const pedro = rest(await contaDeTeste('11911112222@cliente.demo-sitio.firebaseapp.com', 'sitio-4321', 'signInWithPassword'));
 const intruso = rest(await contaDeTeste('19988887777@cliente.outro-site.com', 'sitio-0000'));
 conferir((await anonimo.ler('catalogo')) === 200, 'catálogo deveria ser público');
-for (const caminho of ['pedidos', 'pedidos/' + umPedido.id, 'cadastros', 'cadastros/19988887777', 'clientes', 'vendas', 'produtos', 'membros', 'ajustes/geral', 'clientes/' + clientes[0].id]) {
+for (const caminho of ['pedidos', 'pedidos/' + umPedido.id, 'cadastros', 'cadastros/19988887777', 'clientes', 'vendas', 'produtos', 'membros', 'ajustes/geral', 'clientes/tel19988887777']) {
   conferir((await anonimo.ler(caminho)) === 403, `sem login conseguiu ler ${caminho}`);
 }
 conferir((await pedro.ler('cadastros/19988887777')) === 403, 'Pedro leu o cadastro da Ana');
@@ -377,10 +438,31 @@ const invalidos = {
   'sem itens': { ...valido, itens: [] },
   'data antiga': { ...valido, criadoEm: agora - 2 * 86400000, atualizadoEm: agora - 2 * 86400000 },
   'id trocado': { ...valido, id: 'outro' },
+  'entrega em texto': { ...valido, entregaCent: '5' },
 };
 for (const [nome, dados] of Object.entries(invalidos)) conferir((await pedro.criar('pedidos', 'teste1', dados)) === 403, `pedido inválido aceito: ${nome}`);
 conferir((await pedro.criar('pedidos', 'teste1', valido)) === 200, 'pedido válido do Pedro recusado');
-conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', admin: true, criadoEm: 1, atualizadoEm: 1 })) === 403, 'cadastro com campo a mais aceito');
+conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', admin: true, criadoEm: 1, atualizadoEm: Date.now() })) === 403, 'cadastro com campo a mais aceito');
+conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', criadoEm: 1, atualizadoEm: 1 })) === 403, 'cadastro com data antiga aceito');
+
+passo('dono apaga o Pedro no app: o cadastro da página some e ele preenche de novo');
+await dono.page.goto(base + '#/clientes/' + pedros[0].id + '/editar');
+await dono.page.click('text=Apagar');
+await dono.esperar('Apagado');
+await dono.page.waitForTimeout(1500);
+const [cadPedro] = await doServidor('cadastros', (c) => c.telefone === '11911112222' || c.id === '11911112222');
+conferir(!cadPedro || cadPedro.excluido, 'cadastro do Pedro continua depois de apagar: ' + JSON.stringify(cadPedro));
+conferir(!(await doServidor('clientes', (k) => k.nome === 'Pedro Lima' && !k.excluido)).length, 'Pedro voltou sozinho para Clientes');
+await cliente.page.goto(pagina);
+await cliente.esperar('Complete seu cadastro');
+await cliente.page.getByLabel('Seu nome').fill('Pedro Lima');
+await cliente.page.getByLabel('Endereço (rua e número)').fill('Av. Brasil, 500');
+await cliente.page.getByLabel('Bairro').fill('Vila Nova');
+await cliente.page.getByLabel('Cidade').fill('Valinhos');
+await cliente.page.click('text=Salvar cadastro');
+await cliente.esperar('Olá, Pedro!');
+await dono.page.goto(base + '#/clientes');
+await dono.esperar('Pedro Lima', 15000);
 
 passo('dono fecha a página e o cliente vê o aviso');
 await dono.page.goto(base + '#/pedidos/pagina');

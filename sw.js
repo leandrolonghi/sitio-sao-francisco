@@ -1,7 +1,7 @@
 // Service worker: guarda os arquivos do app no aparelho para abrir rápido e sem internet.
 // A lista abaixo é gerada por tools/release.mjs — rode "npm run release" (na pasta tools) antes de publicar.
 // <gerado>
-const VERSAO = '2026.10.11-a9c4b763';
+const VERSAO = '2026.10.11-2be1db1d';
 const ARQUIVOS = [
   "./",
   "index.html",
@@ -9,6 +9,7 @@ const ARQUIVOS = [
   "manifest.webmanifest",
   "config.js",
   "css/app.css",
+  "js/cadastros.js",
   "js/calc.js",
   "js/db.js",
   "js/estado.js",

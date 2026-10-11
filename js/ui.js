@@ -217,6 +217,25 @@ export function Texto({ rotulo, valor, onChange, placeholder, tipo = 'text', dic
   </${Campo}>`;
 }
 
+// Endereço em partes, igual na página de pedidos e no app. mudarCampo('bairro') devolve o onChange do campo.
+export function CamposEndereco({ dados, mudarCampo, erros = {} }) {
+  return html`
+    <${Texto} rotulo="Endereço (rua e número)" valor=${dados.endereco} onChange=${mudarCampo('endereco')} placeholder="Rua das Flores, 10" erro=${erros.endereco} autocomplete="address-line1" />
+    <${Texto} rotulo="Bairro" valor=${dados.bairro} onChange=${mudarCampo('bairro')} erro=${erros.bairro} />
+    <${Texto} rotulo="Cidade" valor=${dados.cidade} onChange=${mudarCampo('cidade')} erro=${erros.cidade} autocomplete="address-level2" />
+    <${Texto} rotulo="Ponto de referência (opcional)" valor=${dados.referencia} onChange=${mudarCampo('referencia')} placeholder="Ex.: portão verde, perto da igreja" />
+  `;
+}
+
+// Endereço já preenchido, com o botão para mudar.
+export function CartaoEndereco({ rotulo, texto, referencia, onMudar }) {
+  return html`<div class="cartao cartao-endereco">
+    <span class="campo-rotulo">${rotulo}</span>
+    <p class="entrega-endereco"><${Icone} nome="map-pin" tam=${18} /><span>${texto}${referencia ? html`<br /><span class="suave">${referencia}</span>` : ''}</span></p>
+    <button type="button" class="link" onClick=${onMudar}>Mudar endereço</button>
+  </div>`;
+}
+
 export function AreaTexto({ rotulo, valor, onChange, placeholder }) {
   return html`<${Campo} rotulo=${rotulo}>
     <textarea rows="3" value=${valor ?? ''} placeholder=${placeholder} onInput=${(e) => onChange(e.target.value)}></textarea>

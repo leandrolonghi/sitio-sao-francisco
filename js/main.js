@@ -14,6 +14,7 @@ import { Ajustes, Acesso, AcessoPessoa } from './paginas/ajustes.js';
 import { Entregas } from './paginas/entregas.js';
 import { Pedidos, AjustesPagina, pedidosNovos } from './paginas/pedidos.js';
 import { entregasPendentes } from './calc.js';
+import { acompanharCadastros } from './cadastros.js';
 import { NaoEncontrado, SemPermissao } from './paginas/comum.js';
 
 const ABAS = [
@@ -253,6 +254,7 @@ async function iniciar() {
   const { iniciarNuvem } = await import('./nuvem.js');
   const nuvem = await iniciarNuvem(nuvemCfg.config, { emulador: nuvemCfg.emulador });
   mudar({ modo: 'nuvem', nuvem });
+  acompanharCadastros(); // quem se cadastra na página de pedidos aparece em Clientes
   render(comAvisos(html`<${RaizNuvem} nuvem=${nuvem} />`), raiz);
 }
 

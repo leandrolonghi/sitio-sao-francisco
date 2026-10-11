@@ -4,7 +4,9 @@ import { banco } from '../db.js';
 import { pode } from '../estado.js';
 import { saldosPorCliente, vendasAbertas, alocarPagamento, saldoVenda, totalVenda, totalAReceber, situacaoVencimento, fiadoVencido } from '../calc.js';
 import { dinheiro, dataAmigavel, dataBR, dataCurta, formatarTelefone, soDigitos, contem, ordenarPorNome, novoId, linkWhatsApp, plural, qtd, hoje, diasEntre } from '../util.js';
-import { Tela, Secao, Lista, Linha, Vazio, Botao, BotaoTopo, Icone, Texto, AreaTexto, Interruptor, Numero, avisar, trocar, voltar, confirmar } from '../ui.js';
+import { Tela, Secao, Lista, Linha, Vazio, Botao, BotaoTopo, Icone, Texto, AreaTexto, Interruptor, Numero, CamposEndereco, avisar, trocar, voltar, confirmar } from '../ui.js';
+import { CAMPOS_ENDERECO, camposEndereco, enderecoCompleto, textoOuNulo } from '../loja-comum.js';
+import { salvarCliente, apagarCliente } from '../cadastros.js';
 import { NaoEncontrado, nomeDoSitio } from './comum.js';
 import { LinhaVenda, FolhaPagamento } from './vendas.js';
 
@@ -46,24 +48,39 @@ export function ListaPessoas({ col }) {
 export function FormPessoa({ col, id }) {
   const t = TIPOS[col];
   const existente = id ? banco.get(col, id) : null;
+  const ehCliente = col === 'clientes';
+  // cliente que se cadastrou na página de pedidos: o que muda aqui muda lá também
+  const ligado = ehCliente && !!existente?.cadastro;
   const [nome, setNome] = useState(existente?.nome || '');
   const [telefone, setTelefone] = useState(existente?.telefone || '');
-  const [endereco, setEndereco] = useState(existente?.endereco || '');
+  const [end, setEnd] = useState(() => camposEndereco(existente));
   const [obs, setObs] = useState(existente?.obs || '');
   const [ativo, setAtivo] = useState(existente?.ativo !== false);
   const [erro, setErro] = useState('');
   if (id && !existente) return html`<${NaoEncontrado} voltarPara=${'/' + col} />`;
 
+  const mudarEndereco = (campo) => (v) => setEnd((e) => ({ ...e, [campo]: v }));
+
   const salvar = () => {
-    if (!nome.trim()) return setErro('Digite o nome.');
-    const doc = banco.salvar(col, { ...(existente || {}), nome: nome.trim(), telefone: telefone.trim() || null, endereco: endereco.trim() || null, obs: obs.trim() || null, ativo });
+    if (nome.trim().length < (ligado ? 2 : 1)) return setErro('Digite o nome.');
+    const dados = {
+      ...(existente || {}),
+      nome: textoOuNulo(nome),
+      telefone: ligado ? existente.telefone : telefone.trim() || null,
+      ...(ehCliente ? Object.fromEntries(CAMPOS_ENDERECO.map((k) => [k, textoOuNulo(end[k])])) : { endereco: end.endereco.trim() || null }),
+      obs: obs.trim() || null,
+      ativo,
+    };
+    const doc = ehCliente ? salvarCliente(dados) : banco.salvar(col, dados);
     avisar(existente ? 'Alterações salvas' : `${t.um} cadastrado`);
     if (existente) voltar(`/${col}/${doc.id}`);
     else trocar(`/${col}/${doc.id}`);
   };
   const apagar = () => {
-    if (!confirmar(`Apagar ${existente.nome}? O histórico de vendas e despesas continua com o nome.`)) return;
-    banco.excluir(col, existente.id);
+    const pagina = ligado ? ' O cadastro dele na página de pedidos também é apagado: para pedir de novo, ele preenche o cadastro outra vez.' : '';
+    if (!confirmar(`Apagar ${existente.nome}? O histórico de vendas e despesas continua com o nome.${pagina}`)) return;
+    if (ehCliente) apagarCliente(existente);
+    else banco.excluir(col, existente.id);
     avisar('Apagado');
     trocar('/' + col);
   };
@@ -74,9 +91,17 @@ export function FormPessoa({ col, id }) {
     classe="formulario"
     rodape=${html`<${Botao} onClick=${salvar} icone="check">Salvar</${Botao}>`}
   >
+    ${ligado
+      ? html`<div class="faixa"><${Icone} nome="circle-user-round" /><div class="faixa-corpo">
+          <p>Tem cadastro na página de pedidos. O nome e o endereço que você mudar aqui aparecem para o cliente lá.</p>
+          <p>Telefone: <strong>${formatarTelefone(existente.telefone)}</strong>. É com ele que o cliente entra na página, por isso não muda aqui.</p>
+        </div></div>`
+      : ''}
     <${Texto} rotulo="Nome" valor=${nome} onChange=${(v) => (setNome(v), setErro(''))} erro=${erro} autoFocus=${!existente} autocomplete="name" />
-    <${Texto} rotulo="Telefone / WhatsApp" valor=${telefone} onChange=${setTelefone} tipo="tel" placeholder="(19) 99999-9999" autocomplete="tel" />
-    <${Texto} rotulo="Endereço" valor=${endereco} onChange=${setEndereco} placeholder="Opcional" />
+    ${ligado ? '' : html`<${Texto} rotulo="Telefone / WhatsApp" valor=${telefone} onChange=${setTelefone} tipo="tel" placeholder="(19) 99999-9999" autocomplete="tel" />`}
+    ${ehCliente
+      ? html`<${CamposEndereco} dados=${end} mudarCampo=${mudarEndereco} />`
+      : html`<${Texto} rotulo="Endereço" valor=${end.endereco} onChange=${mudarEndereco('endereco')} placeholder="Opcional" />`}
     <${AreaTexto} rotulo="Observação" valor=${obs} onChange=${setObs} placeholder="Opcional" />
     ${existente ? html`<${Interruptor} rotulo="Ativo" dica="Inativos não aparecem para escolher" valor=${ativo} onChange=${setAtivo} />` : ''}
     ${existente ? html`<${Botao} tipo="perigo" icone="trash-2" onClick=${apagar}>Apagar</${Botao}>` : ''}
@@ -103,6 +128,7 @@ export function DetalhePessoa({ col, id }) {
   const [receber, setReceber] = useState(false);
   if (!p) return html`<${NaoEncontrado} voltarPara=${'/' + col} />`;
   const tel = soDigitos(p.telefone);
+  const endereco = enderecoCompleto(p);
 
   let conteudo;
   if (col === 'clientes') {
@@ -158,7 +184,7 @@ export function DetalhePessoa({ col, id }) {
   }
 
   return html`<${Tela} titulo=${p.nome} voltarPara=${'/' + col} direita=${html`<${BotaoTopo} icone="pencil" rotulo="Editar" href=${`#/${col}/${p.id}/editar`} />`}>
-    ${tel || p.endereco || p.obs
+    ${tel || endereco || p.obs
       ? html`<div class="cartao" style="margin-bottom:16px">
           ${tel ? html`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
                 <span>${formatarTelefone(p.telefone)}</span>
@@ -168,8 +194,9 @@ export function DetalhePessoa({ col, id }) {
                 </span>
               </div>`
             : ''}
-          ${p.endereco ? html`<p class="suave" style="margin:${tel ? '8px' : '0'} 0 0">${p.endereco}</p>` : ''}
+          ${endereco ? html`<p class="suave" style="margin:${tel ? '8px' : '0'} 0 0">${endereco}${p.referencia ? html`<br />${p.referencia}` : ''}</p>` : ''}
           ${p.obs ? html`<p class="suave" style="margin:8px 0 0">${p.obs}</p>` : ''}
+          ${p.cadastro ? html`<p class="suave pequeno" style="margin:8px 0 0">Tem cadastro na página de pedidos.</p>` : ''}
         </div>`
       : ''}
     ${conteudo}

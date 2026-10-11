@@ -17,6 +17,15 @@ test('total, pago, saldo e situação da venda', () => {
   assert.equal(c.saldoVenda({ ...v, pagamentos: [], cancelada: true }), 0);
 });
 
+test('valor da entrega soma no total e no que falta receber', () => {
+  const v = { ...venda({ itens: [{ qtd: 2, precoCent: 1600 }], descontoCent: 200 }), entregaCent: 500 };
+  assert.equal(c.totalVenda(v), 3200 - 200 + 500);
+  assert.equal(c.saldoVenda({ ...v, pagamentos: [{ valorCent: 3200 }] }), 300);
+  assert.equal(c.totalVenda({ ...v, entregaCent: null }), 3000);
+  const r = c.resumoPeriodo({ vendas: [{ ...v, data: '2026-10-05' }] }, '2026-10-01', '2026-10-31');
+  assert.equal(r.vendidoCent, 3500);
+});
+
 test('pagamento de fiado quita as vendas mais antigas primeiro', () => {
   const a = venda({ id: 'a', data: '2026-09-01', itens: [{ qtd: 1, precoCent: 3000 }] });
   const b = venda({ id: 'b', data: '2026-09-10', itens: [{ qtd: 1, precoCent: 5000 }] });

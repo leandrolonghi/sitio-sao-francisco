@@ -7,9 +7,11 @@ import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, avisar } from
 import { ehIOS, pode, podeAbrir } from '../estado.js';
 import { nomeVenda, resumoItens } from './comum.js';
 import { mudarPedido } from './pedidos.js';
+import { enderecoCompleto } from '../loja-comum.js';
 
 // O endereço vem sempre do cadastro do cliente.
-export const enderecoDaVenda = (v) => banco.get('clientes', v.clienteId)?.endereco || '';
+export const enderecoDaVenda = (v) => enderecoCompleto(banco.get('clientes', v.clienteId));
+export const referenciaDaVenda = (v) => banco.get('clientes', v.clienteId)?.referencia || '';
 
 export function marcarEntrega(v, feita) {
   banco.salvar('vendas', { ...v, entrega: { ...v.entrega, feita, feitaEm: feita ? hoje() : null } });
@@ -20,6 +22,12 @@ export function marcarEntrega(v, feita) {
 export function BotoesMapa({ endereco }) {
   return html`<${Botao} icone="map-pin" href=${linkMapa(endereco, ehIOS())}>Abrir no mapa</${Botao}>
     <${Botao} tipo="secundario" icone="navigation" href=${linkWaze(endereco)}>Waze</${Botao}>`;
+}
+
+// Endereço da entrega, com o ponto de referência embaixo.
+export function EnderecoEntrega({ v, endereco }) {
+  const ref = referenciaDaVenda(v);
+  return html`<p class="entrega-endereco"><${Icone} nome="map-pin" tam=${18} /><span>${endereco}${ref ? html`<br /><span class="suave">${ref}</span>` : ''}</span></p>`;
 }
 
 // Aviso para quando o cliente não tem endereço no cadastro.
@@ -43,7 +51,7 @@ function CartaoEntrega({ v, h }) {
     </div>
     <p class="suave">${resumoItens(v.itens)}</p>
     <p class="suave">${dinheiro(totalVenda(v))}${saldo > 0 ? html` · <span class="atencao">falta receber ${dinheiro(saldo)}</span>` : ' · paga'}</p>
-    ${endereco ? html`<p class="entrega-endereco"><${Icone} nome="map-pin" tam=${18} /><span>${endereco}</span></p>` : html`<${SemEndereco} venda=${v} />`}
+    ${endereco ? html`<${EnderecoEntrega} v=${v} endereco=${endereco} />` : html`<${SemEndereco} venda=${v} />`}
     <div class="botoes">
       ${endereco ? html`<${BotoesMapa} endereco=${endereco} />` : ''}
       <${Botao} tipo=${endereco ? 'secundario' : 'primario'} icone="check" onClick=${() => marcarEntrega(v, true)}>Marcar como entregue</${Botao}>

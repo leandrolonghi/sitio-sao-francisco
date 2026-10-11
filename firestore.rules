@@ -1,0 +1,40 @@
+rules_version = '2';
+
+// Regras de segurança do banco (Firestore) do app do sítio.
+// Antes de publicar no Firebase, troque EMAIL_DO_RESPONSAVEL pelo e-mail de quem manda no app.
+// Só entra quem confirmou o e-mail e foi liberado em "Pessoas com acesso" (ou é o responsável).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function email() {
+      return request.auth.token.email.lower();
+    }
+
+    function responsavel() {
+      return logado() && email() == 'EMAIL_DO_RESPONSAVEL';
+    }
+
+    function membro() {
+      return logado() && exists(/databases/$(database)/documents/membros/$(email()));
+    }
+
+    function dono() {
+      return responsavel()
+        || (membro() && get(/databases/$(database)/documents/membros/$(email())).data.papel == 'dono');
+    }
+
+    match /membros/{mail} {
+      allow read: if responsavel() || membro();
+      allow write: if dono();
+    }
+
+    match /{colecao}/{id} {
+      allow read, write: if (responsavel() || membro())
+        && colecao in ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes'];
+    }
+  }
+}

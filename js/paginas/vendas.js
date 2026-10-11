@@ -1,0 +1,366 @@
+import { html, useState } from '../vendor/preact.js';
+import { banco } from '../db.js';
+import {
+  FORMAS_PAGAMENTO, totalVenda, totalItens, pagoVenda, saldoVenda, statusVenda, ROTULO_STATUS, valorItem,
+} from '../calc.js';
+import { dinheiro, qtd, hoje, dataAmigavel, dataBR, periodo, entre, contem, novoId, linkWhatsApp, arred3, plural } from '../util.js';
+import {
+  Tela, Secao, Lista, Linha, Etiqueta, Vazio, Botao, BotaoTopo, Icone, CampoData, Seletor, Segmentado, Escolha,
+  CampoDinheiro, EntradaDinheiro, EntradaQtd, AreaTexto, Texto, Folha, avisar, trocar, voltar, confirmar,
+} from '../ui.js';
+import {
+  itensClientes, novoCliente, produtosAtivos, nomeVenda, NaoEncontrado, ultimaForma, guardarForma, saldoCliente,
+  nomeDoSitio, estoqueAtual,
+} from './comum.js';
+
+const TIPO_ETIQUETA = { paga: 'ok', parcial: 'atencao', fiado: 'atencao', cancelada: 'neutra' };
+
+export function EtiquetaVenda({ venda }) {
+  const s = statusVenda(venda);
+  const texto = s === 'parcial' || s === 'fiado' ? `${ROTULO_STATUS[s]} · falta ${dinheiro(saldoVenda(venda))}` : ROTULO_STATUS[s];
+  return html`<${Etiqueta} tipo=${TIPO_ETIQUETA[s]}>${texto}</${Etiqueta}>`;
+}
+
+export function LinhaVenda({ venda, mostrarData = true }) {
+  const itens = (venda.itens || []).map((i) => `${qtd(i.qtd)} ${i.unidade || ''} ${i.nome || ''}`.trim()).join(', ');
+  return html`<${Linha}
+    href=${'#/vendas/' + venda.id}
+    titulo=${nomeVenda(venda)}
+    sub=${(mostrarData ? dataAmigavel(venda.data) + ' · ' : '') + (itens || 'sem itens')}
+    direita=${html`<span class=${venda.cancelada ? 'suave' : ''} style=${venda.cancelada ? 'text-decoration:line-through' : ''}>${dinheiro(totalVenda(venda))}</span>`}
+    direitaSub=${statusVenda(venda) !== 'paga' ? html`<${EtiquetaVenda} venda=${venda} />` : ''}
+  />`;
+}
+
+const FILTROS = [
+  ['hoje', 'Hoje'],
+  ['mes', 'Este mês'],
+  ['mes-passado', 'Mês passado'],
+  ['abertas', 'Em aberto'],
+  ['tudo', 'Tudo'],
+];
+
+export function ListaVendas({ query = {} }) {
+  const [filtro, setFiltro] = useState(FILTROS.some(([k]) => k === query.filtro) ? query.filtro : 'mes');
+  const [busca, setBusca] = useState('');
+  const h = hoje();
+  let vendas = banco.lista('vendas');
+  if (filtro === 'hoje') vendas = vendas.filter((v) => v.data === h);
+  else if (filtro === 'abertas') vendas = vendas.filter((v) => saldoVenda(v) > 0);
+  else if (filtro !== 'tudo') {
+    const p = periodo(filtro, h);
+    vendas = vendas.filter((v) => entre(v.data, p.ini, p.fim));
+  }
+  if (busca) vendas = vendas.filter((v) => contem(nomeVenda(v) + ' ' + (v.itens || []).map((i) => i.nome).join(' '), busca));
+  vendas.sort((a, b) => b.data.localeCompare(a.data) || (b.criadoEm || 0) - (a.criadoEm || 0));
+  const validas = vendas.filter((v) => !v.cancelada);
+  const total = validas.reduce((s, v) => s + (filtro === 'abertas' ? saldoVenda(v) : totalVenda(v)), 0);
+
+  return html`<${Tela} titulo="Vendas" direita=${html`<${BotaoTopo} icone="plus" rotulo="Nova venda" href="#/vendas/nova" />`}>
+    <div class="filtros">
+      ${FILTROS.map(([k, r]) => html`<button class=${'filtro' + (filtro === k ? ' ativo' : '')} onClick=${() => setFiltro(k)}>${r}</button>`)}
+    </div>
+    <div class="busca"><${Icone} nome="search" tam=${18} /><input value=${busca} placeholder="Buscar cliente ou produto" onInput=${(e) => setBusca(e.target.value)} /></div>
+    ${vendas.length
+      ? html`<div class="total-lista"><span>${plural(validas.length, 'venda', 'vendas')}${filtro === 'abertas' ? ' em aberto' : ''}</span><strong>${dinheiro(total)}</strong></div>
+          <${Lista}>${vendas.map((v) => html`<${LinhaVenda} key=${v.id} venda=${v} />`)}</${Lista}>`
+      : html`<${Vazio} icone="shopping-cart" texto=${busca ? 'Nenhuma venda encontrada.' : 'Nenhuma venda neste período.'}>
+          <${Botao} href="#/vendas/nova" icone="plus">Nova venda</${Botao}>
+        </${Vazio}>`}
+  </${Tela}>`;
+}
+
+// ---------- Nova venda / editar ----------
+
+export function FormVenda({ id, query = {} }) {
+  const existente = id ? banco.get('vendas', id) : null;
+  const [data, setData] = useState(existente?.data || hoje());
+  const [clienteId, setClienteId] = useState(existente?.clienteId || query.cliente || '');
+  const [itens, setItens] = useState(() => (existente?.itens || []).map((i) => ({ ...i, chave: novoId() })));
+  const [descontoCent, setDesconto] = useState(existente?.descontoCent || null);
+  const [verDesconto, setVerDesconto] = useState(!!existente?.descontoCent);
+  const [comoPaga, setComoPaga] = useState('agora');
+  const [forma, setForma] = useState(ultimaForma());
+  const [recebidoCent, setRecebido] = useState(null);
+  const [obs, setObs] = useState(existente?.obs || '');
+  const [erros, setErros] = useState({});
+  if (id && !existente) return html`<${NaoEncontrado} voltarPara="/vendas" />`;
+
+  const produtos = produtosAtivos();
+  const estoque = estoqueAtual();
+  const total = Math.max(0, totalItens(itens) - (descontoCent || 0));
+  const recebido = comoPaga === 'agora' ? Math.min(recebidoCent ?? total, total) : 0;
+  const falta = total - recebido;
+
+  const mudarItem = (chave, mudanca) => setItens((lista) => lista.map((i) => (i.chave === chave ? { ...i, ...mudanca } : i)));
+  const removerItem = (chave) => setItens((lista) => lista.filter((i) => i.chave !== chave));
+  const adicionar = (p) =>
+    setItens((lista) => {
+      const ja = lista.find((i) => i.produtoId === p.id);
+      if (ja) return lista.map((i) => (i === ja ? { ...i, qtd: arred3((i.qtd || 0) + 1) } : i));
+      return [...lista, { chave: novoId(), produtoId: p.id, nome: p.nome, unidade: p.unidade, qtd: 1, precoCent: p.precoCent ?? null }];
+    });
+  const adicionarAvulso = () => setItens((lista) => [...lista, { chave: novoId(), produtoId: null, nome: '', unidade: 'un', qtd: 1, precoCent: null }]);
+
+  function salvar() {
+    const e = {};
+    if (!itens.length) e.itens = 'Adicione pelo menos um produto.';
+    else if (itens.some((i) => !(i.qtd > 0))) e.itens = 'Confira as quantidades.';
+    else if (itens.some((i) => i.precoCent == null || Number.isNaN(i.precoCent))) e.itens = 'Coloque o preço de todos os itens.';
+    else if (itens.some((i) => !i.produtoId && !i.nome?.trim())) e.itens = 'Dê um nome ao item avulso.';
+    const ficaDevendo = existente ? total - pagoVenda(existente) > 0 : falta > 0;
+    if (ficaDevendo && !clienteId) e.cliente = 'Para vender fiado, escolha o cliente.';
+    setErros(e);
+    if (Object.keys(e).length) {
+      avisar(Object.values(e)[0], 'erro');
+      return;
+    }
+    const cliente = banco.get('clientes', clienteId);
+    const limpos = itens.map(({ chave, ...i }) => ({ ...i, nome: i.nome?.trim() || 'Item', qtd: arred3(i.qtd) }));
+    let pagamentos = existente?.pagamentos || [];
+    if (!existente && comoPaga === 'agora' && recebido > 0) {
+      pagamentos = [{ id: novoId(), data, valorCent: recebido, forma }];
+      guardarForma(forma);
+    }
+    const doc = banco.salvar('vendas', {
+      ...(existente || {}),
+      data,
+      clienteId: clienteId || null,
+      clienteNome: cliente?.nome || null,
+      itens: limpos,
+      descontoCent: descontoCent || 0,
+      totalCent: total,
+      pagamentos,
+      obs: obs.trim() || null,
+      cancelada: existente?.cancelada || false,
+    });
+    // atualiza o preço do produto se ainda não tinha
+    for (const i of limpos) {
+      const p = i.produtoId && banco.get('produtos', i.produtoId);
+      if (p && p.precoCent == null) banco.salvar('produtos', { ...p, precoCent: i.precoCent });
+    }
+    avisar(existente ? 'Venda atualizada' : 'Venda registrada');
+    if (existente) voltar('/vendas/' + doc.id);
+    else trocar('/vendas/' + doc.id);
+  }
+
+  const saldoAnterior = clienteId ? saldoCliente(clienteId) - (existente ? saldoVenda(existente) : 0) : 0;
+
+  return html`<${Tela}
+    titulo=${existente ? 'Editar venda' : 'Nova venda'}
+    voltarPara=${existente ? '/vendas/' + existente.id : '/vendas'}
+    classe="formulario"
+    rodape=${html`<div>
+      <div class="rodape-total"><span>Total${comoPaga === 'agora' && falta > 0 && !existente ? ` · fica devendo ${dinheiro(falta)}` : ''}</span><strong>${dinheiro(total)}</strong></div>
+      <${Botao} onClick=${salvar} icone="check">${existente ? 'Salvar alterações' : 'Registrar venda'}</${Botao}>
+    </div>`}
+  >
+    <div class="dupla">
+      <${CampoData} valor=${data} onChange=${setData} />
+      <${Seletor}
+        rotulo="Cliente"
+        itens=${itensClientes()}
+        valor=${clienteId}
+        onChange=${(v) => (setClienteId(v), setErros({ ...erros, cliente: null }))}
+        placeholder="Balcão"
+        rotuloVazio="Venda no balcão (sem cliente)"
+        onNovo=${novoCliente}
+        textoNovo="Cadastrar cliente"
+        erro=${erros.cliente}
+      />
+    </div>
+    ${saldoAnterior > 0 ? html`<p class="campo-dica atencao" style="margin-top:-6px">Este cliente já deve ${dinheiro(saldoAnterior)}.</p>` : ''}
+
+    <${Secao} titulo="Produtos">
+      ${produtos.length
+        ? html`<div class="chips-produtos">
+            ${produtos.map((p) => {
+              const no = itens.find((i) => i.produtoId === p.id);
+              return html`<button type="button" class=${'chip-produto' + (no ? ' no-carrinho' : '')} onClick=${() => adicionar(p)}>
+                ${p.nome}
+                <small>${p.precoCent != null ? `${dinheiro(p.precoCent)}/${p.unidade}` : p.unidade}${p.controlaEstoque ? ` · tem ${qtd(estoque.get(p.id) || 0)}` : ''}</small>
+              </button>`;
+            })}
+            <button type="button" class="chip-produto" onClick=${adicionarAvulso}>+ Outro item<small>fora da lista</small></button>
+          </div>`
+        : html`<div class="faixa"><${Icone} nome="package" /><div class="faixa-corpo"><p>Você ainda não cadastrou produtos.</p><p><a href="#/produtos/novo">Cadastrar produto</a> ou <button class="link" onClick=${adicionarAvulso}>lançar item avulso</button>.</p></div></div>`}
+    </${Secao}>
+
+    ${itens.length
+      ? html`<div class="lista">
+          ${itens.map(
+            (i) => html`<div class="item-venda" key=${i.chave}>
+              <div class="item-venda-topo">
+                ${i.produtoId
+                  ? html`<strong>${i.nome}</strong>`
+                  : html`<input value=${i.nome} placeholder="Nome do item" onInput=${(e) => mudarItem(i.chave, { nome: e.target.value })} style="min-height:40px;padding:6px 10px" />`}
+                <span class="item-venda-total">${dinheiro(valorItem(i))}</span>
+                <button type="button" class="botao-remover" aria-label="Tirar item" onClick=${() => removerItem(i.chave)}><${Icone} nome="x" tam=${20} /></button>
+              </div>
+              <div class="item-venda-campos" style="grid-template-columns: auto 1fr">
+                <div class="passo">
+                  <button type="button" aria-label="Menos" onClick=${() => mudarItem(i.chave, { qtd: Math.max(0, arred3((i.qtd || 0) - 1)) })}><${Icone} nome="minus" tam=${18} /></button>
+                  <span style="width:84px"><${EntradaQtd} valor=${i.qtd} unidade=${i.unidade} onChange=${(v) => mudarItem(i.chave, { qtd: v })} /></span>
+                  <button type="button" aria-label="Mais" onClick=${() => mudarItem(i.chave, { qtd: arred3((i.qtd || 0) + 1) })}><${Icone} nome="plus" tam=${18} /></button>
+                </div>
+                <${EntradaDinheiro} valor=${i.precoCent} onChange=${(v) => mudarItem(i.chave, { precoCent: v })} placeholder="preço" />
+              </div>
+            </div>`,
+          )}
+        </div>`
+      : ''}
+    ${erros.itens ? html`<p class="campo-dica erro">${erros.itens}</p>` : ''}
+
+    ${verDesconto
+      ? html`<${CampoDinheiro} rotulo="Desconto" valor=${descontoCent} onChange=${setDesconto} />`
+      : itens.length
+        ? html`<button type="button" class="link" style="align-self:flex-start" onClick=${() => setVerDesconto(true)}>+ Dar desconto</button>`
+        : ''}
+
+    ${!existente
+      ? html`<${Secao} titulo="Pagamento">
+          <div class="grupo">
+            <${Segmentado} valor=${comoPaga} onChange=${setComoPaga} opcoes=${[['agora', 'Pagou agora'], ['fiado', 'Fiado (paga depois)']]} />
+            ${comoPaga === 'agora'
+              ? html`<div class="dupla">
+                  <${Escolha} rotulo="Forma" valor=${forma} onChange=${setForma} opcoes=${FORMAS_PAGAMENTO} />
+                  <${CampoDinheiro} rotulo="Valor recebido" valor=${recebidoCent ?? total} onChange=${setRecebido} />
+                </div>
+                ${falta > 0 && total > 0 ? html`<p class="campo-dica atencao">Recebeu menos que o total: ${dinheiro(falta)} ficam como fiado.</p>` : ''}`
+              : html`<p class="campo-dica">O valor vai para “A receber” no nome do cliente.</p>`}
+          </div>
+        </${Secao}>`
+      : ''}
+
+    <${AreaTexto} rotulo="Observação" valor=${obs} onChange=${setObs} placeholder="Opcional" />
+  </${Tela}>`;
+}
+
+// ---------- Detalhe da venda ----------
+
+function textoComprovante(v) {
+  const linhas = [`*${nomeDoSitio()}*`, `Venda de ${dataBR(v.data)}${v.clienteId ? ' para ' + nomeVenda(v) : ''}`, ''];
+  for (const i of v.itens || []) linhas.push(`• ${i.nome}: ${qtd(i.qtd)} ${i.unidade || ''} x ${dinheiro(i.precoCent)} = ${dinheiro(valorItem(i))}`);
+  if (v.descontoCent) linhas.push(`Desconto: -${dinheiro(v.descontoCent)}`);
+  linhas.push('', `*Total: ${dinheiro(totalVenda(v))}*`);
+  const pago = pagoVenda(v);
+  if (pago > 0) linhas.push(`Pago: ${dinheiro(pago)}`);
+  if (saldoVenda(v) > 0) linhas.push(`Em aberto: ${dinheiro(saldoVenda(v))}`);
+  linhas.push('', 'Obrigado!');
+  return linhas.join('\n');
+}
+
+export function compartilharTexto(texto, telefone) {
+  if (telefone) {
+    window.open(linkWhatsApp(telefone, texto), '_blank');
+  } else if (navigator.share) {
+    navigator.share({ text: texto }).catch(() => {});
+  } else {
+    window.open(linkWhatsApp('', texto), '_blank');
+  }
+}
+
+export function FolhaPagamento({ titulo = 'Receber pagamento', saldoCent, onSalvar, onFechar, detalhe }) {
+  const [valor, setValor] = useState(saldoCent);
+  const [forma, setForma] = useState(ultimaForma());
+  const [data, setData] = useState(hoje());
+  const salvar = () => {
+    if (!(valor > 0)) return avisar('Digite o valor recebido.', 'erro');
+    if (valor > saldoCent) return avisar(`O valor passa do que está em aberto (${dinheiro(saldoCent)}).`, 'erro');
+    guardarForma(forma);
+    onSalvar({ valorCent: valor, forma, data });
+  };
+  return html`<${Folha} titulo=${titulo} onFechar=${onFechar}>
+    <div class="formulario">
+      <p class="suave" style="margin:0">Em aberto: <strong class="atencao">${dinheiro(saldoCent)}</strong>${detalhe ? ' · ' + detalhe : ''}</p>
+      <${CampoDinheiro} rotulo="Valor recebido" valor=${valor} onChange=${setValor} />
+      <div class="dupla">
+        <${Escolha} rotulo="Forma" valor=${forma} onChange=${setForma} opcoes=${FORMAS_PAGAMENTO} />
+        <${CampoData} valor=${data} onChange=${setData} />
+      </div>
+      <${Botao} onClick=${salvar} icone="check">Confirmar recebimento</${Botao}>
+    </div>
+  </${Folha}>`;
+}
+
+export function DetalheVenda({ id }) {
+  const v = banco.get('vendas', id);
+  const [receber, setReceber] = useState(false);
+  if (!v) return html`<${NaoEncontrado} voltarPara="/vendas" />`;
+  const cliente = banco.get('clientes', v.clienteId);
+  const saldo = saldoVenda(v);
+  const total = totalVenda(v);
+
+  const registrarPagamento = ({ valorCent, forma, data }) => {
+    banco.salvar('vendas', { ...v, pagamentos: [...(v.pagamentos || []), { id: novoId(), data, valorCent, forma }] });
+    setReceber(false);
+    avisar('Pagamento registrado');
+  };
+  const removerPagamento = (p) => {
+    if (!confirmar(`Apagar o pagamento de ${dinheiro(p.valorCent)} de ${dataBR(p.data)}?`)) return;
+    banco.salvar('vendas', { ...v, pagamentos: v.pagamentos.filter((x) => x.id !== p.id) });
+    avisar('Pagamento apagado');
+  };
+  const cancelar = () => {
+    if (v.cancelada) {
+      banco.salvar('vendas', { ...v, cancelada: false });
+      avisar('Venda reativada');
+    } else if (confirmar('Cancelar esta venda? Ela deixa de contar nos relatórios e os produtos voltam ao estoque.')) {
+      banco.salvar('vendas', { ...v, cancelada: true });
+      avisar('Venda cancelada');
+    }
+  };
+  const excluir = () => {
+    if (!confirmar('Apagar esta venda de vez?')) return;
+    banco.excluir('vendas', v.id);
+    avisar('Venda apagada');
+    voltar('/vendas');
+  };
+
+  return html`<${Tela} titulo="Venda" voltarPara="/vendas" direita=${html`<${BotaoTopo} icone="pencil" rotulo="Editar" href=${'#/vendas/' + v.id + '/editar'} />`}>
+    <div class="detalhe-topo">
+      <div class="valor-grande" style=${v.cancelada ? 'text-decoration:line-through' : ''}>${dinheiro(total)}</div>
+      <p>${dataAmigavel(v.data)} · ${cliente ? html`<a href=${'#/clientes/' + cliente.id}>${cliente.nome}</a>` : nomeVenda(v)}</p>
+      <${EtiquetaVenda} venda=${v} />
+    </div>
+
+    ${saldo > 0
+      ? html`<div class="botoes" style="margin-bottom:22px">
+          <${Botao} icone="hand-coins" onClick=${() => setReceber(true)}>Receber pagamento</${Botao}>
+        </div>`
+      : ''}
+
+    <${Secao} titulo="Itens">
+      <${Lista}>
+        ${(v.itens || []).map(
+          (i) => html`<${Linha}
+            titulo=${i.nome}
+            sub=${`${qtd(i.qtd)} ${i.unidade || ''} × ${dinheiro(i.precoCent)}`}
+            direita=${dinheiro(valorItem(i))}
+          />`,
+        )}
+        ${v.descontoCent ? html`<${Linha} titulo="Desconto" direita=${'- ' + dinheiro(v.descontoCent)} />` : ''}
+      </${Lista}>
+    </${Secao}>
+
+    <${Secao} titulo="Pagamentos">
+      ${(v.pagamentos || []).length
+        ? html`<${Lista}>
+            ${v.pagamentos.map(
+              (p) => html`<${Linha} titulo=${p.forma || 'Pagamento'} sub=${dataBR(p.data) + ' · toque para apagar'} direita=${dinheiro(p.valorCent)} onClick=${() => removerPagamento(p)} />`,
+            )}
+          </${Lista}>`
+        : html`<p class="suave" style="margin:0 4px">Nenhum pagamento ainda.</p>`}
+      ${saldo > 0 ? html`<p class="atencao" style="margin:10px 4px 0">Falta receber <strong>${dinheiro(saldo)}</strong>.</p>` : ''}
+    </${Secao}>
+
+    ${v.obs ? html`<${Secao} titulo="Observação"><div class="cartao">${v.obs}</div></${Secao}>` : ''}
+
+    <div class="botoes">
+      <${Botao} tipo="secundario" icone="message-circle" onClick=${() => compartilharTexto(textoComprovante(v), cliente?.telefone)}>Enviar comprovante</${Botao}>
+      <${Botao} tipo="secundario" icone="ban" onClick=${cancelar}>${v.cancelada ? 'Reativar venda' : 'Cancelar venda'}</${Botao}>
+      <${Botao} tipo="perigo" icone="trash-2" onClick=${excluir}>Apagar venda</${Botao}>
+    </div>
+    ${receber ? html`<${FolhaPagamento} saldoCent=${saldo} onSalvar=${registrarPagamento} onFechar=${() => setReceber(false)} />` : ''}
+  </${Tela}>`;
+}

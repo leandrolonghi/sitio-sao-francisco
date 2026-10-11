@@ -1,0 +1,19 @@
+{
+  "name": "sitio-tools",
+  "private": true,
+  "type": "module",
+  "description": "Ferramentas de desenvolvimento (não é preciso para o app rodar).",
+  "scripts": {
+    "vendor": "node build-vendor.mjs",
+    "test": "node --test ../tests/*.test.mjs",
+    "release": "node release.mjs",
+    "icones": "node gerar-icones.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "firebase": "12.19.0",
+    "htm": "3.1.1",
+    "lucide-static": "1.47.0",
+    "preact": "10.29.8"
+  }
+}

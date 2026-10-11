@@ -112,6 +112,8 @@ export function FormVenda({ id, query = {} }) {
   // venda feita a partir de um pedido da página de pedidos
   const [doPedido] = useState(() => (!existente ? dadosDoPedido(query.pedido) : null));
   const pedido = doPedido?.pedido;
+  // o cliente pode cancelar pela página enquanto o pedido não vira venda
+  const pedidoCancelado = pedido && banco.get('pedidos', pedido.id)?.status === 'cancelado';
   const [data, setData] = useState(existente?.data || hoje());
   const [clienteId, setClienteId] = useState(existente?.clienteId || query.cliente || '');
   const [itens, setItens] = useState(() => (existente?.itens || doPedido?.itens || []).map((i) => ({ ...i, chave: novoId() })));
@@ -159,6 +161,7 @@ export function FormVenda({ id, query = {} }) {
   const adicionarAvulso = () => setItens((lista) => [...lista, { chave: novoId(), produtoId: null, nome: '', unidade: 'un', qtd: 1, precoCent: null }]);
 
   function salvar() {
+    if (pedidoCancelado) return avisar('O cliente cancelou este pedido.', 'erro');
     const e = {};
     if (!itens.length) e.itens = 'Adicione pelo menos um produto.';
     else if (itens.some((i) => !(i.qtd > 0))) e.itens = 'Confira as quantidades.';
@@ -226,11 +229,15 @@ export function FormVenda({ id, query = {} }) {
       <${Botao} onClick=${salvar} icone="check">${existente ? 'Salvar alterações' : 'Registrar venda'}</${Botao}>
     </div>`}
   >
-    ${pedido
-      ? html`<div class="faixa"><${Icone} nome="shopping-cart" /><div class="faixa-corpo">
-          <p>Pedido de <strong>${pedido.nome}</strong> pela página. Confira os itens e os preços e registre a venda para confirmar.</p>
+    ${pedidoCancelado
+      ? html`<div class="faixa erro"><${Icone} nome="ban" /><div class="faixa-corpo">
+          <p><strong>${pedido.nome}</strong> cancelou este pedido pela página.</p>
         </div></div>`
-      : ''}
+      : pedido
+        ? html`<div class="faixa"><${Icone} nome="shopping-cart" /><div class="faixa-corpo">
+            <p>Pedido de <strong>${pedido.nome}</strong> pela página. Confira os itens e os preços e registre a venda para confirmar.</p>
+          </div></div>`
+        : ''}
     <div class="dupla">
       <${CampoData} valor=${data} onChange=${setData} />
       <${Seletor}

@@ -5,7 +5,8 @@ rules_version = '2';
 // e ID_DO_PROJETO pelo código do projeto no Firebase.
 // No app só entra quem confirmou o e-mail e foi liberado em "Pessoas com acesso" (ou é o responsável).
 // Na página de pedidos, qualquer um vê o catálogo; o cliente cadastrado (telefone e senha) vê e muda
-// só o próprio cadastro, faz pedidos e vê só os pedidos do próprio telefone.
+// só o próprio cadastro, faz pedidos, vê só os pedidos do próprio telefone e cancela os que o sítio ainda
+// não respondeu.
 // O cadastro do cliente também aparece no app (Clientes), onde o sítio pode mudar nome e endereço.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -106,9 +107,17 @@ service cloud.firestore {
     }
 
     // Página de pedidos: o cliente faz pedidos no próprio telefone e vê só os dele.
+    // Enquanto o sítio não responde, ele pode cancelar (só muda a situação para "cancelado").
     match /pedidos/{id} {
       allow read: if cliente() && resource.data.telefone == telefoneDoCliente();
       allow create: if cliente() && pedidoNovo(id) && request.resource.data.telefone == telefoneDoCliente();
+      allow update: if cliente() && resource.data.telefone == telefoneDoCliente()
+        && resource.data.status == 'novo'
+        && request.resource.data.status == 'cancelado'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'atualizadoEm'])
+        && request.resource.data.atualizadoEm is int
+        && request.resource.data.atualizadoEm > resource.data.atualizadoEm
+        && request.resource.data.atualizadoEm < request.time.toMillis() + 3600000;
     }
   }
 }

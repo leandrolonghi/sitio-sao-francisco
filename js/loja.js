@@ -440,6 +440,11 @@ function Catalogo() {
     </div>
     ${erro ? html`<div class="faixa erro"><${Icone} nome="circle-alert" /><div class="faixa-corpo"><p>${erro}</p><p><button class="link" onClick=${carregarCatalogo}>Tentar de novo</button></p></div></div>` : ''}
     ${fechada ? html`<${AvisoFechada} />` : ''}
+    ${!fechada && info.taxaEntregaCent > 0
+      ? html`<div class="faixa"><${Icone} nome="truck" /><div class="faixa-corpo">
+          <p>Entrega: <strong>${dinheiro(info.taxaEntregaCent)}</strong>. Retirando no sítio, não paga entrega.</p>
+        </div></div>`
+      : ''}
     ${produtos === null
       ? html`<p class="suave centro">Carregando os produtos…</p>`
       : !produtos.length && !erro
@@ -549,7 +554,12 @@ function Finalizar() {
       </ul>
       <p class="campo-dica">O sítio confirma o valor final.</p>
     </div>
-    <${Segmentado} rotulo="Como quer receber?" valor=${entrega} onChange=${setEntrega} opcoes=${[['entregar', 'Entregar'], ['retirar', 'Retirar no sítio']]} />
+    <${Segmentado}
+      rotulo="Como quer receber?"
+      valor=${entrega}
+      onChange=${setEntrega}
+      opcoes=${[['entregar', info.taxaEntregaCent > 0 ? `Entregar (${dinheiro(info.taxaEntregaCent)})` : 'Entregar'], ['retirar', 'Retirar no sítio']]}
+    />
     ${entregar && !mudandoEndereco
       ? html`<${CartaoEndereco} rotulo="Entregar em" texto=${enderecoCompleto(end.dados)} referencia=${end.dados.referencia} onMudar=${() => setMudandoEndereco(true)} />`
       : ''}
@@ -588,12 +598,38 @@ function Enviado({ id }) {
   </${Tela}>`;
 }
 
+// O cliente cancela o pedido enquanto o sítio ainda não confirmou (as regras só deixam nesse caso).
+async function cancelarPedido(p) {
+  const novo = await loja.db.mudar('pedidos/' + p.id, { status: 'cancelado', atualizadoEm: Math.max(Date.now(), (p.atualizadoEm || 0) + 1) });
+  const lista = meusPedidos() || [];
+  if (loja.sessao?.telefone === novo.telefone) mudar({ meus: { telefone: novo.telefone, lista: lista.map((x) => (x.id === novo.id ? novo : x)) } });
+}
+
 function MeusPedidos() {
   const { atualizandoMeus, erroMeus } = useLoja();
   const pedidos = meusPedidos();
+  const [cancelando, setCancelando] = useState(null);
   useEffect(() => {
     carregarMeus();
   }, []);
+  const cancelar = async (p) => {
+    if (!confirmar('Cancelar este pedido? O sítio vai ver que você cancelou.')) return;
+    setCancelando(p.id);
+    try {
+      await cancelarPedido(p);
+      avisar('Pedido cancelado');
+    } catch (e) {
+      console.error(e);
+      if (loginPerdido(e)) return sairDaConta('Entre de novo com seu telefone e senha.');
+      if (e.code === 'unavailable') return avisar(SEM_INTERNET, 'erro');
+      await carregarMeus();
+      // ainda "Recebido": não foi o sítio que confirmou, é a página que está sendo atualizada
+      const ainda = (meusPedidos() || []).find((x) => x.id === p.id)?.status === 'novo';
+      avisar(ainda ? EM_ATUALIZACAO : 'Não deu para cancelar: o sítio já respondeu este pedido. Fale com o sítio.', 'erro');
+    } finally {
+      setCancelando(null);
+    }
+  };
   return html`<${Tela} titulo="Meus pedidos">
     ${erroMeus ? html`<div class="faixa erro"><${Icone} nome="circle-alert" /><div class="faixa-corpo"><p>${erroMeus}</p></div></div>` : ''}
     ${pedidos === null
@@ -617,6 +653,11 @@ function MeusPedidos() {
                 ${p.totalCent ? html`<p><strong>${p.status === 'novo' ? 'Total estimado' : 'Total'}: ${dinheiro(p.totalCent)}</strong></p>` : ''}
                 <p class="suave">${p.entrega === 'entregar' ? 'Entregar' : 'Retirar no sítio'}${p.dataDesejada ? ' · para ' + dataBR(p.dataDesejada) : ''}</p>
                 <p class="suave">${s.texto}</p>
+                ${p.status === 'novo'
+                  ? html`<div class="botoes" style="margin-top:12px">
+                      <${Botao} tipo="secundario" icone="ban" onClick=${() => cancelar(p)} desativado=${cancelando === p.id}>${cancelando === p.id ? 'Cancelando…' : 'Cancelar pedido'}</${Botao}>
+                    </div>`
+                  : ''}
               </div>`;
             })}
             <div class="botoes" style="margin-top:14px">

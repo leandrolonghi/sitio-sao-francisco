@@ -9,7 +9,7 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 - **Página de pedidos** para os clientes: o cliente faz um cadastro e entra com telefone e senha, escolhe os
   produtos e acompanha o pedido; no app o pedido vira venda (e entrega) com um toque. O cadastro do cliente é o
   mesmo na página e em Clientes no app
-- **Valor da entrega**: cobrado no pedido da página e na venda (dá para mudar em cada venda)
+- **Valor da entrega** (em Ajustes): cobrado no pedido da página e na venda (dá para mudar em cada venda)
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
 - **Estoque e produção**: produção do dia, entradas, perdas, consumo e acerto de contagem; as vendas descontam sozinhas
 - **Produtos, clientes e fornecedores**
@@ -65,10 +65,13 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
   de novo. Isso fica em `js/cadastros.js`.
 - Os produtos que aparecem são escolhidos em **Pedidos dos clientes → Produtos e ajustes da página** (ou no
   cadastro do produto). Só vão para a página nome, unidade e preço. Lá também dá para fechar a página, colocar
-  o WhatsApp do sítio e o **valor da entrega**, que soma no pedido quando o cliente escolhe Entregar. Na venda,
-  o valor da entrega vem preenchido (do pedido, ou o dos ajustes) e dá para mudar.
+  o WhatsApp do sítio. O **valor da entrega** fica em **Ajustes** (e também aparece ali): a página mostra o valor
+  ao escolher os produtos e soma no pedido quando o cliente escolhe Entregar. Na venda, o valor da entrega vem
+  preenchido (do pedido, ou o dos Ajustes) e dá para mudar.
 - O pedido chega no app como **novo**; **Transformar em venda** abre a venda já preenchida e, ao registrar,
   o cliente vê **Confirmado**. Quando a entrega é marcada como feita, o cliente vê **Entregue**.
+- Enquanto o sítio não responde, o cliente pode **cancelar o pedido** em Meus pedidos; no app ele sai dos
+  pedidos novos e aparece como **Cancelado**. Depois de confirmado ou recusado, só o sítio muda.
 - As regras do banco deixam quem não tem login só ver o catálogo. O cliente logado vê e muda só o próprio
   cadastro, faz pedidos no próprio telefone (conferidos campo a campo) e vê só os pedidos dele. Quem usa o app
   lê e muda os cadastros.

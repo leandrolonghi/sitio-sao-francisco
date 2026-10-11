@@ -2,10 +2,11 @@ import { html, useState, useEffect, useRef } from '../vendor/preact.js';
 import { banco, lerDadosLocais, apagarDadosLocais, COLECOES } from '../db.js';
 import { CATEGORIAS_PADRAO } from '../calc.js';
 import { hoje, plural } from '../util.js';
-import { Tela, Secao, Lista, Linha, Botao, Texto, Campo, Interruptor, Vazio, avisar, baixarArquivo, confirmar, ir, trocar } from '../ui.js';
+import { Tela, Secao, Lista, Linha, Botao, Texto, Campo, CampoDinheiro, Interruptor, Vazio, avisar, baixarArquivo, confirmar, ir, trocar } from '../ui.js';
 import { app, mudar, estaInstalado, pode, AREAS } from '../estado.js';
 import { nomeDoSitio, categoriasDespesa } from './comum.js';
 import { Sincronia } from './inicio.js';
+import { infoLoja, salvarTaxaEntrega } from './pedidos.js';
 import { ouvirMembros, salvarMembro, salvarAreas, removerMembro, mensagemErro } from '../nuvem.js';
 import { VERSAO } from '../versao.js';
 
@@ -14,12 +15,14 @@ export function Ajustes() {
   const [nome, setNome] = useState(aj.nomeSitio || '');
   const [pix, setPix] = useState(aj.chavePix || '');
   const [cats, setCats] = useState(categoriasDespesa().join('\n'));
+  const [taxa, setTaxa] = useState(infoLoja().taxaEntregaCent || null);
   const [enviando, setEnviando] = useState(false);
   const arquivo = useRef();
 
   const salvar = () => {
     const categorias = cats.split('\n').map((c) => c.trim()).filter(Boolean);
     banco.salvar('ajustes', { ...aj, id: 'geral', nomeSitio: nome.trim() || null, chavePix: pix.trim() || null, categorias: categorias.length ? [...new Set(categorias)] : CATEGORIAS_PADRAO });
+    salvarTaxaEntrega(taxa);
     avisar('Ajustes salvos');
   };
 
@@ -97,6 +100,7 @@ export function Ajustes() {
       <div class="cartao formulario">
         <${Texto} rotulo="Nome do sítio" valor=${nome} onChange=${setNome} placeholder="Sítio São Francisco" />
         <${Texto} rotulo="Chave Pix" valor=${pix} onChange=${setPix} placeholder="Opcional, vai na mensagem de cobrança" />
+        <${CampoDinheiro} rotulo="Valor da entrega" valor=${taxa} onChange=${setTaxa} dica="Aparece no pedido do cliente quando ele escolhe Entregar e vem preenchido nas vendas com entrega (dá para mudar em cada venda). Em branco, não cobra." />
         <${Campo} rotulo="Categorias de despesa" dica="Uma por linha">
           <textarea rows="8" value=${cats} onInput=${(e) => setCats(e.target.value)}></textarea>
         </${Campo}>

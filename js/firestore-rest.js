@@ -113,6 +113,12 @@ export function conectar(config, emulador = false, pegarToken = async () => null
       return lerDoc(await pedir('/' + caminho, { fields: paraCampos(dados) }, 'PATCH'));
     },
 
+    // Muda só alguns campos de um documento que já existe.
+    async mudar(caminho, campos) {
+      const mascara = Object.keys(campos).map((k) => 'updateMask.fieldPaths=' + encodeURIComponent(k)).join('&');
+      return lerDoc(await pedir(`/${caminho}?${mascara}&currentDocument.exists=true`, { fields: paraCampos(campos) }, 'PATCH'));
+    },
+
     // Cria todos juntos (ou nenhum). escritas: [[caminho, dados], ...]
     async criarJuntos(escritas) {
       await pedir(':commit', {

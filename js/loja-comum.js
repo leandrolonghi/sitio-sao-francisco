@@ -9,6 +9,7 @@ export const STATUS_PEDIDO = {
   confirmado: { nome: 'Confirmado', tipo: 'ok', texto: 'O sítio confirmou o pedido.' },
   entregue: { nome: 'Entregue', tipo: 'ok', texto: 'Pedido concluído.' },
   recusado: { nome: 'Não aceito', tipo: 'erro', texto: 'O sítio não pôde atender este pedido.' },
+  cancelado: { nome: 'Cancelado', tipo: 'neutra', texto: 'Pedido cancelado pelo cliente.' },
 };
 
 // Telefone só com DDD e número (sem 55, sem zero na frente).

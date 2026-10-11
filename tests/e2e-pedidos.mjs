@@ -72,6 +72,9 @@ function rest(token) {
     ler: (caminho) => fetch(`${DOCS}/${caminho}`, { headers: cab() }).then((r) => r.status),
     criar: (col, id, dados) => fetch(`${DOCS}/${col}?documentId=${id}`, { method: 'POST', headers: cab(true), body: corpo(dados) }).then((r) => r.status),
     mudar: (caminho, dados) => fetch(`${DOCS}/${caminho}`, { method: 'PATCH', headers: cab(true), body: corpo(dados) }).then((r) => r.status),
+    // muda só os campos passados (como a página faz ao cancelar)
+    mudarCampos: (caminho, dados) =>
+      fetch(`${DOCS}/${caminho}?${Object.keys(dados).map((k) => 'updateMask.fieldPaths=' + k).join('&')}`, { method: 'PATCH', headers: cab(true), body: corpo(dados) }).then((r) => r.status),
     consultar: (col, campo, valor) =>
       fetch(`${DOCS}:runQuery`, {
         method: 'POST',
@@ -151,7 +154,14 @@ await dono.page.getByLabel('Observação').fill('cliente antigo');
 await dono.page.click('text=Salvar');
 await dono.esperar('cliente antigo');
 
-passo('dono abre Pedidos, coloca o Mel na página, o WhatsApp do sítio e o valor da entrega');
+passo('dono coloca o valor da entrega nos Ajustes');
+await dono.page.goto(base + '#/ajustes');
+await dono.page.getByLabel('Valor da entrega').fill('5');
+await dono.foto('ajustes-entrega');
+await dono.page.click('text=Salvar ajustes');
+await dono.esperar('Ajustes salvos');
+
+passo('dono abre Pedidos, coloca o Mel na página e o WhatsApp do sítio');
 await dono.page.goto(base + '#/mais');
 await dono.page.click('text=Pedidos dos clientes');
 await dono.esperar('Nenhum pedido novo');
@@ -161,7 +171,7 @@ await dono.page.click('text=Produtos e ajustes da página');
 await dono.esperar('Produtos que aparecem na página');
 await dono.page.locator('.interruptor-linha', { hasText: 'Mel' }).click();
 await dono.page.getByLabel('WhatsApp do sítio').fill('(19) 97777-6666');
-await dono.page.getByLabel('Valor da entrega').fill('5');
+conferir((await dono.page.getByLabel('Valor da entrega').inputValue()) === '5,00', 'valor da entrega dos Ajustes não aparece nos ajustes da página');
 await dono.foto('ajustes-pagina');
 await dono.page.click('text=Salvar');
 await dono.esperar('Página de pedidos atualizada');
@@ -170,6 +180,7 @@ const catalogo = await docsDoServidor('catalogo');
 conferir(catalogo.length === 3, `catálogo deveria ter 2 produtos e os dados da página, tem ${catalogo.length}`);
 conferir(!catalogo.some((d) => d.nome === 'Queijo'), 'Queijo foi para a página sem ser escolhido');
 conferir(catalogo.every((d) => !('criadoPor' in d)), 'catálogo público guarda o e-mail de quem cadastrou');
+conferir(catalogo.find((d) => d.id === '_loja')?.taxaEntregaCent === 500, 'valor da entrega não foi para a página: ' + JSON.stringify(catalogo.find((d) => d.id === '_loja')));
 
 passo('cliente faz o cadastro com endereço e senha');
 const cliente = await aparelho('cliente');
@@ -212,6 +223,7 @@ conferir(ana?.id === 'tel19988887777' && ana.referencia === 'Portão verde' && !
 passo('cliente vê só os produtos escolhidos');
 await cliente.esperar('Ovos caipira');
 await cliente.esperar('R$ 30,00 / ');
+await cliente.esperar('Retirando no sítio, não paga entrega');
 conferir(!(await cliente.page.locator('text=Queijo').count()), 'cliente vê produto que não foi escolhido');
 const produto = (nome) => cliente.page.locator('.loja-produto', { hasText: nome });
 await produto('Ovos caipira').locator('text=Adicionar').click();
@@ -223,7 +235,7 @@ passo('cliente pede para entregar: o endereço já vem do cadastro');
 await cliente.page.click('text=Continuar');
 await cliente.esperar('Como quer receber?');
 await cliente.esperar('Rua das Flores, 10, Centro, Campinas');
-await cliente.esperar('Entrega');
+await cliente.esperar('Entregar (R$ 5,00)');
 await cliente.esperar('R$ 37,00');
 conferir(!(await cliente.page.getByLabel('Bairro').count()), 'pediu o endereço de novo em vez de usar o do cadastro');
 await cliente.page.getByLabel('Observação').fill('Deixar no portão');
@@ -316,6 +328,35 @@ await dono.foto('pedidos-historico');
 await cliente.page.click('.abas >> text=Meus pedidos');
 await cliente.esperar('Não aceito');
 await cliente.esperar('Entregue');
+conferir((await cliente.page.locator('text=Cancelar pedido').count()) === 0, 'pedido já respondido mostra "Cancelar pedido"');
+
+passo('terceiro pedido: o cliente cancela antes do sítio confirmar');
+await cliente.page.click('.abas >> text=Fazer pedido');
+await produto('Mel').locator('text=Adicionar').click();
+await cliente.page.click('[aria-label="Mais Mel"]');
+await cliente.page.click('text=Continuar');
+await cliente.page.click('text=Retirar no sítio');
+await cliente.page.click('text=Enviar pedido');
+await cliente.esperar('Pedido enviado!');
+await dono.page.goto(base + '#/pedidos');
+await dono.esperar('2 un Mel', 15000);
+await dono.page.click('text=Transformar em venda');
+await dono.esperar('Venda do pedido');
+await cliente.page.click('text=Ver meus pedidos');
+await cliente.esperar('Cancelar pedido');
+await cliente.foto('meus-com-cancelar');
+await cliente.page.click('text=Cancelar pedido');
+await cliente.esperar('Pedido cancelado');
+await cliente.page.locator('.cartao.pedido', { hasText: '2 un Mel' }).getByText('Cancelado', { exact: true }).waitFor();
+await dono.esperar('cancelou este pedido pela página', 15000);
+await dono.page.click('text=Registrar venda');
+await dono.esperar('O cliente cancelou este pedido.');
+await dono.page.goto(base + '#/pedidos');
+await dono.esperar('Nenhum pedido novo');
+await dono.page.locator('.linha', { hasText: 'Cancelado' }).first().waitFor();
+await dono.foto('pedidos-com-cancelado');
+const cancelado = (await docsDoServidor('pedidos')).find((p) => p.status === 'cancelado');
+conferir(cancelado && !cancelado.vendaId && (await docsDoServidor('vendas')).length === 1, 'pedido cancelado: ' + JSON.stringify(cancelado));
 
 passo('sem internet, "Meus pedidos" mostra na hora os últimos pedidos vistos');
 semRede = true;
@@ -381,7 +422,7 @@ const pedidosAna = (await docsDoServidor('pedidos')).filter((p) => p.telefone ==
 conferir(pedidosAna.some((p) => p.endereco === 'Rua das Flores, 10, Jardim Novo, Campinas'), 'pedido com o endereço novo: ' + JSON.stringify(pedidosAna.map((p) => p.endereco)));
 await cliente2.page.click('text=Ver meus pedidos');
 await cliente2.esperar('Não aceito');
-conferir((await cliente2.page.locator('.cartao.pedido').count()) === 3, 'no outro celular deveria ver os 3 pedidos');
+conferir((await cliente2.page.locator('.cartao.pedido').count()) === 4, 'no outro celular deveria ver os 4 pedidos');
 
 passo('o endereço que a Ana mudou na página aparece no app');
 await dono.page.goto(base + '#/clientes/tel19988887777');
@@ -442,6 +483,14 @@ const invalidos = {
 };
 for (const [nome, dados] of Object.entries(invalidos)) conferir((await pedro.criar('pedidos', 'teste1', dados)) === 403, `pedido inválido aceito: ${nome}`);
 conferir((await pedro.criar('pedidos', 'teste1', valido)) === 200, 'pedido válido do Pedro recusado');
+const depois = Date.now() + 1000;
+conferir((await pedro.mudarCampos('pedidos/teste1', { status: 'confirmado', atualizadoEm: depois })) === 403, 'cliente confirmou o próprio pedido');
+conferir((await pedro.mudarCampos('pedidos/teste1', { status: 'cancelado', totalCent: 1, atualizadoEm: depois })) === 403, 'cliente mudou o total ao cancelar');
+conferir((await pedro.mudarCampos('pedidos/' + umPedido.id, { status: 'cancelado', atualizadoEm: depois })) === 403, 'Pedro cancelou um pedido da Ana');
+conferir((await pedro.mudarCampos('pedidos/teste1', { status: 'cancelado', atualizadoEm: depois })) === 200, 'Pedro não conseguiu cancelar o próprio pedido');
+const anaRest = rest(await contaDeTeste('19988887777@cliente.demo-sitio.firebaseapp.com', 'sitio-1234', 'signInWithPassword'));
+const respondido = pedidosAna.find((p) => p.status !== 'novo');
+conferir(respondido && (await anaRest.mudarCampos('pedidos/' + respondido.id, { status: 'cancelado', atualizadoEm: depois })) === 403, 'cliente cancelou pedido que o sítio já respondeu');
 conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', admin: true, criadoEm: 1, atualizadoEm: Date.now() })) === 403, 'cadastro com campo a mais aceito');
 conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', criadoEm: 1, atualizadoEm: 1 })) === 403, 'cadastro com data antiga aceito');
 

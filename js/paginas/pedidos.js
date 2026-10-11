@@ -16,6 +16,13 @@ export const pedidosNovos = () => banco.lista('pedidos').filter((p) => p.status 
 
 export const infoLoja = () => banco.get('catalogo', INFO_LOJA) || { aberta: true };
 
+// Valor da entrega (fica junto com os dados da página, que os clientes leem). Muda nos Ajustes ou nos ajustes da página.
+export function salvarTaxaEntrega(taxa) {
+  const valor = taxa > 0 ? taxa : null;
+  if ((infoLoja().taxaEntregaCent || null) === valor) return;
+  banco.salvar('catalogo', { tipo: 'loja', nome: nomeDoSitio(), ...infoLoja(), id: INFO_LOJA, taxaEntregaCent: valor });
+}
+
 // Coloca (ou tira) o produto da página de pedidos. Só vão para lá nome, unidade e preço.
 export function publicarNoCatalogo(p, apagado = false) {
   const mostrar = !apagado && p.naLoja && p.ativo !== false;
@@ -76,7 +83,7 @@ export function Pedidos() {
   const novos = todos.filter((p) => p.status === 'novo').reverse();
   const confirmados = todos.filter((p) => p.status === 'confirmado');
   const limite = addDias(hoje(), -14);
-  const antigos = todos.filter((p) => (p.status === 'entregue' || p.status === 'recusado') && diaDe(p.atualizadoEm || p.criadoEm) >= limite);
+  const antigos = todos.filter((p) => ['entregue', 'recusado', 'cancelado'].includes(p.status) && diaDe(p.atualizadoEm || p.criadoEm) >= limite);
   const link = linkDaPagina();
   const compartilhar = () => {
     const texto = `Faça seu pedido no ${nomeDoSitio()}: ${link}`;

@@ -1,5 +1,6 @@
 // Teste de ponta a ponta da página de pedidos dos clientes, com os emuladores do Firebase
-// (auth 9099, firestore 8080, regras de firestore.rules com EMAIL_DO_RESPONSAVEL = dono@teste.com).
+// (auth 9099, firestore 8080, regras de firestore.rules com EMAIL_DO_RESPONSAVEL = dono@teste.com
+// e ID_DO_PROJETO = demo-sitio).
 // Uso: node tests/e2e-pedidos.mjs http://localhost:8123 pasta-para-prints
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url + '/../../tools/');
@@ -24,6 +25,7 @@ process.on('uncaughtException', async (e) => {
 });
 const conferir = (ok, msg) => ok || erros.push(msg);
 let semRede = false; // enquanto o teste corta a internet, erros de rede são esperados
+let erroEsperado = null; // erro do console que o passo atual provoca de propósito (ex.: senha errada)
 
 async function limparEmuladores() {
   await fetch(`${AUTH}/emulator/v1/projects/demo-sitio/accounts`, { method: 'DELETE' });
@@ -60,22 +62,32 @@ const paraFirestore = (v) =>
   : Array.isArray(v) ? { arrayValue: { values: v.map(paraFirestore) } }
   : { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, paraFirestore(x)])) } };
 
-// Pedidos feitos "na mão", sem login, como faria alguém mal-intencionado.
-const anonimo = {
-  ler: (caminho) => fetch(`${DOCS}/${caminho}`).then((r) => r.status),
-  criar: (col, id, dados) =>
-    fetch(`${DOCS}/${col}?documentId=${id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: paraFirestore(dados).mapValue.fields }),
-    }).then((r) => r.status),
-  mudar: (caminho, dados) =>
-    fetch(`${DOCS}/${caminho}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: paraFirestore(dados).mapValue.fields }),
-    }).then((r) => r.status),
-};
+// Pedidos feitos "na mão" pela API, como faria alguém mal-intencionado (sem login ou com outra conta).
+function rest(token) {
+  const cab = (json) => ({ ...(json ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) });
+  const corpo = (dados) => JSON.stringify({ fields: paraFirestore(dados).mapValue.fields });
+  return {
+    ler: (caminho) => fetch(`${DOCS}/${caminho}`, { headers: cab() }).then((r) => r.status),
+    criar: (col, id, dados) => fetch(`${DOCS}/${col}?documentId=${id}`, { method: 'POST', headers: cab(true), body: corpo(dados) }).then((r) => r.status),
+    mudar: (caminho, dados) => fetch(`${DOCS}/${caminho}`, { method: 'PATCH', headers: cab(true), body: corpo(dados) }).then((r) => r.status),
+    consultar: (col, campo, valor) =>
+      fetch(`${DOCS}:runQuery`, {
+        method: 'POST',
+        headers: cab(true),
+        body: JSON.stringify({ structuredQuery: { from: [{ collectionId: col }], where: { fieldFilter: { field: { fieldPath: campo }, op: 'EQUAL', value: { stringValue: valor } } } } }),
+      }).then((r) => r.status),
+  };
+}
+const anonimo = rest(null);
+
+async function contaDeTeste(email, senha, acao = 'signUp') {
+  const r = await fetch(`${AUTH}/identitytoolkit.googleapis.com/v1/accounts:${acao}?key=demo-chave`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: senha, returnSecureToken: true }),
+  }).then((x) => x.json());
+  return r.idToken;
+}
 
 const navegador = await chromium.launch();
 async function aparelho(nome) {
@@ -83,7 +95,12 @@ async function aparelho(nome) {
   const page = await ctx.newPage();
   telas.push([nome, page]);
   page.on('pageerror', (e) => erros.push(`${nome} pageerror: ${e.message}`));
-  page.on('console', (m) => m.type() === 'error' && !(semRede && /ERR_INTERNET_DISCONNECTED|sem conexão/.test(m.text())) && erros.push(`${nome} console: ${m.text()}`));
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    if (semRede && /ERR_INTERNET_DISCONNECTED|sem conexão/.test(m.text())) return;
+    if (erroEsperado && erroEsperado.test(m.text())) return;
+    erros.push(`${nome} console: ${m.text()}`);
+  });
   page.on('dialog', (d) => d.accept());
   const foto = async (rot) => prints && page.screenshot({ path: `${prints}/p${String(++n).padStart(2, '0')}-${nome}-${rot}.png` });
   const esperar = (t, timeout = 10000) => page.getByText(t, { exact: false }).first().waitFor({ timeout });
@@ -135,19 +152,34 @@ conferir(catalogo.length === 3, `catálogo deveria ter 2 produtos e os dados da 
 conferir(!catalogo.some((d) => d.nome === 'Queijo'), 'Queijo foi para a página sem ser escolhido');
 conferir(catalogo.every((d) => !('criadoPor' in d)), 'catálogo público guarda o e-mail de quem cadastrou');
 
-passo('cliente entra com nome e telefone e vê só os produtos escolhidos');
+passo('cliente faz o cadastro com endereço e senha');
 const cliente = await aparelho('cliente');
 let baixouSdk = false;
 cliente.page.on('request', (r) => r.url().includes('vendor/firebase.js') && (baixouSdk = true));
+const campo = (rotulo) => cliente.page.getByLabel(rotulo);
 await cliente.page.goto(pagina);
 await cliente.esperar('Faça seu pedido');
 await cliente.foto('entrar');
-await cliente.page.click('text=Entrar');
+await cliente.page.click('.entrada-links >> text=Fazer cadastro');
+await cliente.esperar('Faça seu cadastro');
+await cliente.page.click('form >> text=Fazer cadastro');
 await cliente.esperar('Digite seu nome');
-await cliente.page.getByLabel('Seu nome').fill('Ana Souza');
-await cliente.page.getByLabel('Seu telefone (WhatsApp)').fill('(19) 98888-7777');
-await cliente.page.click('text=Entrar');
+await cliente.esperar('A senha tem 4 números');
+await campo('Seu nome').fill('Ana Souza');
+await campo('Telefone (WhatsApp)').fill('(19) 98888-7777');
+await campo('Endereço (rua e número)').fill('Rua das Flores, 10');
+await campo('Bairro').fill('Centro');
+await campo('Cidade').fill('Campinas');
+await campo('Ponto de referência').fill('Portão verde');
+await campo('Crie uma senha').fill('12a345');
+conferir((await campo('Crie uma senha').inputValue()) === '1234', 'a senha deveria aceitar só 4 números');
+await cliente.foto('cadastro');
+await cliente.page.click('form >> text=Fazer cadastro');
 await cliente.esperar('Olá, Ana!');
+let [cadastro] = await docsDoServidor('cadastros');
+conferir(cadastro?.telefone === '19988887777' && cadastro.bairro === 'Centro' && cadastro.referencia === 'Portão verde', 'cadastro no servidor: ' + JSON.stringify(cadastro));
+
+passo('cliente vê só os produtos escolhidos');
 await cliente.esperar('Ovos caipira');
 await cliente.esperar('R$ 30,00 / ');
 conferir(!(await cliente.page.locator('text=Queijo').count()), 'cliente vê produto que não foi escolhido');
@@ -157,12 +189,11 @@ await cliente.page.click('[aria-label="Mais Ovos caipira"]');
 await cliente.esperar('R$ 32,00');
 await cliente.foto('catalogo');
 
-passo('cliente pede para entregar');
+passo('cliente pede para entregar: o endereço já vem do cadastro');
 await cliente.page.click('text=Continuar');
 await cliente.esperar('Como quer receber?');
-await cliente.page.click('text=Enviar pedido');
-await cliente.esperar('Coloque o endereço para a entrega');
-await cliente.page.getByPlaceholder('Rua, número, bairro, cidade').fill('Rua das Flores, 10, Centro, Campinas');
+await cliente.esperar('Rua das Flores, 10, Centro, Campinas');
+conferir(!(await cliente.page.getByLabel('Bairro').count()), 'pediu o endereço de novo em vez de usar o do cadastro');
 await cliente.page.getByLabel('Observação').fill('Deixar no portão');
 await cliente.foto('finalizar');
 await cliente.page.click('text=Enviar pedido');
@@ -183,8 +214,9 @@ await dono.page.goto(base + '#/mais');
 await dono.esperar('1 novo');
 await dono.page.click('text=Pedidos dos clientes');
 await dono.esperar('Ana Souza');
-await dono.esperar('Rua das Flores');
+await dono.esperar('Rua das Flores, 10, Centro, Campinas');
 await dono.esperar('Deixar no portão');
+await dono.esperar('Ponto de referência: Portão verde');
 await dono.foto('pedido-novo');
 
 passo('dono transforma o pedido em venda');
@@ -247,48 +279,108 @@ await cliente.foto('meus-sem-internet');
 await cliente.ctx.setOffline(false);
 semRede = false;
 conferir(!baixouSdk, 'a página de pedidos baixou o Firebase completo (deveria usar só a API REST)');
-await cliente.foto('meus-dois');
 
-passo('cliente sai e entra de novo escrevendo diferente: vê os mesmos pedidos');
-await cliente.page.click('[aria-label="Sair"]');
-await cliente.esperar('Faça seu pedido');
-await cliente.page.getByLabel('Seu nome').fill('  ana  souza ');
-await cliente.page.getByLabel('Seu telefone (WhatsApp)').fill('+55 19 98888 7777');
-await cliente.page.click('text=Entrar');
-await cliente.page.click('.abas >> text=Meus pedidos');
-await cliente.esperar('Não aceito');
-conferir((await cliente.page.locator('.cartao.pedido').count()) === 2, 'depois de entrar de novo, deveria ver 2 pedidos');
+passo('cliente sai; senha errada e telefone já cadastrado não entram');
+const sair = async () => {
+  await cliente.page.click('.abas >> text=Meu cadastro');
+  await cliente.esperar('Telefone: (19) 98888-7777');
+  await cliente.foto('meu-cadastro');
+  await cliente.page.click('.botoes >> text=Sair');
+  await cliente.esperar('Primeira vez aqui?');
+};
+await sair();
+erroEsperado = /status of 400|INVALID_LOGIN_CREDENTIALS|INVALID_PASSWORD|EMAIL_EXISTS/;
+await campo('Telefone (WhatsApp)').fill('19 98888-7777');
+await campo('Senha (4 números)').fill('9999');
+await cliente.page.click('form >> text=Entrar');
+await cliente.esperar('Telefone ou senha não conferem');
+await cliente.foto('senha-errada');
+await cliente.page.click('.entrada-links >> text=Fazer cadastro');
+await campo('Seu nome').fill('Outra Pessoa');
+await campo('Telefone (WhatsApp)').fill('(19) 98888-7777');
+await campo('Endereço (rua e número)').fill('Rua X, 1');
+await campo('Bairro').fill('B');
+await campo('Cidade').fill('C');
+await campo('Crie uma senha').fill('5555');
+await cliente.page.click('form >> text=Fazer cadastro');
+await cliente.esperar('Este telefone já tem cadastro');
+erroEsperado = null;
+[cadastro] = await docsDoServidor('cadastros');
+conferir(cadastro?.nome === 'Ana Souza', 'outra pessoa mudou o cadastro da Ana: ' + JSON.stringify(cadastro));
 
-passo('outra pessoa com o mesmo telefone não vê esses pedidos');
-await cliente.page.click('[aria-label="Sair"]');
-await cliente.page.getByLabel('Seu nome').fill('Pedro');
-await cliente.page.getByLabel('Seu telefone (WhatsApp)').fill('(19) 98888-7777');
-await cliente.page.click('text=Entrar');
+passo('em outro celular, entra com telefone e senha e o endereço já vem pronto');
+const cliente2 = await aparelho('cliente-outro-celular');
+await cliente2.page.goto(pagina);
+await cliente2.page.getByLabel('Telefone (WhatsApp)').fill('+55 19 98888 7777');
+await cliente2.page.getByLabel('Senha (4 números)').fill('1234');
+await cliente2.page.click('form >> text=Entrar');
+await cliente2.esperar('Olá, Ana!');
+await cliente2.page.locator('.loja-produto', { hasText: 'Ovos caipira' }).locator('text=Adicionar').click();
+await cliente2.page.click('text=Continuar');
+await cliente2.esperar('Entregar em');
+await cliente2.esperar('Rua das Flores, 10, Centro, Campinas');
+await cliente2.esperar('Portão verde');
+await cliente2.foto('endereco-pronto');
+await cliente2.page.click('text=Mudar endereço');
+await cliente2.page.getByLabel('Bairro').fill('Jardim Novo');
+await cliente2.page.click('text=Enviar pedido');
+await cliente2.esperar('Pedido enviado!');
+await cliente2.page.waitForTimeout(1000);
+[cadastro] = await docsDoServidor('cadastros');
+conferir(cadastro?.bairro === 'Jardim Novo', 'endereço novo não foi para o cadastro: ' + JSON.stringify(cadastro));
+const pedidosAna = (await docsDoServidor('pedidos')).filter((p) => p.telefone === '19988887777');
+conferir(pedidosAna.some((p) => p.endereco === 'Rua das Flores, 10, Jardim Novo, Campinas'), 'pedido com o endereço novo: ' + JSON.stringify(pedidosAna.map((p) => p.endereco)));
+await cliente2.page.click('text=Ver meus pedidos');
+await cliente2.esperar('Não aceito');
+conferir((await cliente2.page.locator('.cartao.pedido').count()) === 3, 'no outro celular deveria ver os 3 pedidos');
+
+passo('outro cliente não vê os pedidos nem o cadastro da Ana');
+await cliente.page.click('text=Já tenho cadastro');
+await cliente.page.click('.entrada-links >> text=Fazer cadastro');
+await campo('Seu nome').fill('Pedro Lima');
+await campo('Telefone (WhatsApp)').fill('(11) 91111-2222');
+await campo('Endereço (rua e número)').fill('Av. Brasil, 500');
+await campo('Bairro').fill('Vila Nova');
+await campo('Cidade').fill('Valinhos');
+await campo('Crie uma senha').fill('4321');
+await cliente.page.click('form >> text=Fazer cadastro');
+await cliente.esperar('Olá, Pedro!');
 await cliente.page.click('.abas >> text=Meus pedidos');
 await cliente.esperar('Você ainda não fez pedidos');
 
-passo('sem login não dá para ver nem mudar os dados do sítio');
-const [umPedido] = await docsDoServidor('pedidos');
+passo('as regras bloqueiam o que não é de cada um');
+const umPedido = pedidosAna[0];
+const pedro = rest(await contaDeTeste('11911112222@cliente.demo-sitio.firebaseapp.com', 'sitio-4321', 'signInWithPassword'));
+const intruso = rest(await contaDeTeste('19988887777@cliente.outro-site.com', 'sitio-0000'));
 conferir((await anonimo.ler('catalogo')) === 200, 'catálogo deveria ser público');
-conferir((await anonimo.ler('pedidos/' + umPedido.id)) === 200, 'pedido deveria abrir pelo número');
-for (const caminho of ['pedidos', 'clientes', 'vendas', 'produtos', 'membros', 'ajustes/geral', 'clientes/' + clientes[0].id]) {
+for (const caminho of ['pedidos', 'pedidos/' + umPedido.id, 'cadastros', 'cadastros/19988887777', 'clientes', 'vendas', 'produtos', 'membros', 'ajustes/geral', 'clientes/' + clientes[0].id]) {
   conferir((await anonimo.ler(caminho)) === 403, `sem login conseguiu ler ${caminho}`);
 }
-conferir((await anonimo.mudar('pedidos/' + umPedido.id, { ...umPedido, status: 'confirmado' })) === 403, 'sem login conseguiu mudar um pedido');
+conferir((await pedro.ler('cadastros/19988887777')) === 403, 'Pedro leu o cadastro da Ana');
+conferir((await pedro.ler('pedidos/' + umPedido.id)) === 403, 'Pedro leu um pedido da Ana');
+conferir((await pedro.consultar('pedidos', 'telefone', '19988887777')) === 403, 'Pedro listou os pedidos da Ana');
+conferir((await pedro.consultar('pedidos', 'telefone', '11911112222')) === 200, 'Pedro não conseguiu listar os próprios pedidos');
+conferir((await pedro.ler('clientes')) === 403 && (await pedro.ler('vendas')) === 403, 'cliente da página leu dados do sítio');
+conferir((await pedro.mudar('cadastros/19988887777', { telefone: '19988887777', nome: 'Hacker', criadoEm: 1, atualizadoEm: 1 })) === 403, 'Pedro mudou o cadastro da Ana');
+conferir((await pedro.mudar('pedidos/' + umPedido.id, { ...umPedido, status: 'confirmado' })) === 403, 'Pedro mudou um pedido da Ana');
+conferir((await intruso.ler('pedidos/' + umPedido.id)) === 403, 'conta de outro domínio com o telefone da Ana leu o pedido dela');
+conferir((await intruso.ler('cadastros/19988887777')) === 403, 'conta de outro domínio leu o cadastro da Ana');
 conferir((await anonimo.mudar('catalogo/' + catalogo[0].id, { id: catalogo[0].id, nome: 'X', ativo: true })) === 403, 'sem login conseguiu mudar o catálogo');
+conferir((await pedro.mudar('catalogo/' + catalogo[0].id, { id: catalogo[0].id, nome: 'X', ativo: true })) === 403, 'cliente conseguiu mudar o catálogo');
 const agora = Date.now();
-const valido = { id: 'teste1', nome: 'Teste', telefone: '19912345678', entrega: 'retirar', endereco: null, dataDesejada: null, itens: [{ nome: 'Ovos', qtd: 1 }], totalCent: 0, obs: null, status: 'novo', criadoEm: agora, atualizadoEm: agora };
+const valido = { id: 'teste1', nome: 'Pedro Lima', telefone: '11911112222', entrega: 'retirar', endereco: null, dataDesejada: null, itens: [{ nome: 'Ovos', qtd: 1 }], totalCent: 0, obs: null, status: 'novo', criadoEm: agora, atualizadoEm: agora };
+conferir((await anonimo.criar('pedidos', 'teste1', valido)) === 403, 'pedido sem login aceito');
 const invalidos = {
+  'no telefone da Ana': { ...valido, telefone: '19988887777' },
   'já confirmado': { ...valido, status: 'confirmado' },
   'campo a mais': { ...valido, vendaId: 'x' },
   'sem itens': { ...valido, itens: [] },
-  'telefone errado': { ...valido, telefone: '123' },
   'data antiga': { ...valido, criadoEm: agora - 2 * 86400000, atualizadoEm: agora - 2 * 86400000 },
   'id trocado': { ...valido, id: 'outro' },
 };
-for (const [nome, dados] of Object.entries(invalidos)) conferir((await anonimo.criar('pedidos', 'teste1', dados)) === 403, `pedido inválido aceito: ${nome}`);
-conferir((await anonimo.criar('pedidos', 'teste1', valido)) === 200, 'pedido válido recusado');
-conferir((await anonimo.criar('contas/qualquer/pedidos', umPedido.id, { criadoEm: umPedido.criadoEm })) === 403, 'conseguiu pôr um pedido antigo em outra conta');
+for (const [nome, dados] of Object.entries(invalidos)) conferir((await pedro.criar('pedidos', 'teste1', dados)) === 403, `pedido inválido aceito: ${nome}`);
+conferir((await pedro.criar('pedidos', 'teste1', valido)) === 200, 'pedido válido do Pedro recusado');
+conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', admin: true, criadoEm: 1, atualizadoEm: 1 })) === 403, 'cadastro com campo a mais aceito');
 
 passo('dono fecha a página e o cliente vê o aviso');
 await dono.page.goto(base + '#/pedidos/pagina');

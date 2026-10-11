@@ -27,10 +27,15 @@ export function nomeNormal(nome) {
   return normalizar(nome).replace(/\s+/g, ' ');
 }
 
-// Chave da "conta" do cliente na página: resumo (SHA-256) do telefone com o nome.
-// Quem souber o telefone e o nome consegue ver os pedidos daquela pessoa.
-export async function chaveCliente(telefone, nome) {
-  const dados = new TextEncoder().encode(`${telefoneNormal(telefone)}|${nomeNormal(nome)}`);
-  const resumo = await crypto.subtle.digest('SHA-256', dados);
-  return Array.from(new Uint8Array(resumo), (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 40);
-}
+// Login do cliente na página: uma conta do Firebase (e-mail e senha) feita a partir do telefone.
+// O e-mail fica no domínio do próprio projeto no Firebase, onde ninguém recebe e-mail; as regras conferem esse formato.
+export const emailDoCliente = (telefone, projeto) => `${telefoneNormal(telefone)}@cliente.${projeto}.firebaseapp.com`;
+export const senhaDoCliente = (pin) => `sitio-${pin}`;
+export const pinValido = (pin) => /^[0-9]{4}$/.test(pin);
+
+// Endereço numa linha só: é o que vai no pedido e abre no mapa e no Waze.
+export const enderecoCompleto = (c) =>
+  [c?.endereco, c?.bairro, c?.cidade]
+    .map((x) => (x || '').trim())
+    .filter(Boolean)
+    .join(', ');

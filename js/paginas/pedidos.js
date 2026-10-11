@@ -68,7 +68,7 @@ function CartaoPedido({ p }) {
       <${Icone} nome=${p.entrega === 'entregar' ? 'truck' : 'house'} tam=${18} />
       <span>${p.entrega === 'entregar' ? 'Entregar' + (p.endereco ? ': ' + p.endereco : '') : 'Vai retirar no sítio'}${p.dataDesejada ? ` · para ${dataBR(p.dataDesejada)}` : ''}</span>
     </p>
-    ${p.obs ? html`<p class="suave">“${p.obs}”</p>` : ''}
+    ${p.obs ? html`<p class="suave" style="white-space:pre-line">“${p.obs}”</p>` : ''}
     <div class="botoes">
       <${Botao} icone="shopping-cart" onClick=${virarVenda}>Transformar em venda</${Botao}>
       <${Botao} tipo="secundario" icone="message-circle" href=${linkWhatsApp(p.telefone)}>Conversar no WhatsApp</${Botao}>

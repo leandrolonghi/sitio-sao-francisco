@@ -37,20 +37,25 @@ const lerDoc = (d) => ({ id: d.name.split('/').pop(), ...lerCampos(d.fields) });
 
 const erro = (mensagem, code) => Object.assign(new Error(mensagem), { code });
 
-export function conectar(config, emulador = false) {
+// pegarToken: função que devolve o token de quem está logado (ou null), mandado junto em cada pedido.
+export function conectar(config, emulador = false, pegarToken = async () => null) {
   const raiz = emulador ? 'http://127.0.0.1:8080' : 'https://firestore.googleapis.com';
   const banco = `projects/${config.projectId}/databases/(default)/documents`;
 
-  async function pedir(caminho, corpo) {
+  async function pedir(caminho, corpo, metodo = corpo ? 'POST' : 'GET') {
+    const token = await pegarToken();
     const parar = new AbortController();
     const relogio = setTimeout(() => parar.abort(), PRAZO);
     const sep = caminho.includes('?') ? '&' : '?';
+    const cabecalhos = {};
+    if (corpo) cabecalhos['Content-Type'] = 'application/json';
+    if (token) cabecalhos.Authorization = 'Bearer ' + token;
     let resp;
     let dados;
     try {
       resp = await fetch(`${raiz}/v1/${banco}${caminho}${sep}key=${encodeURIComponent(config.apiKey)}`, {
-        method: corpo ? 'POST' : 'GET',
-        headers: corpo ? { 'Content-Type': 'application/json' } : undefined,
+        method: metodo,
+        headers: cabecalhos,
         body: corpo ? JSON.stringify(corpo) : undefined,
         signal: parar.signal,
       });
@@ -60,9 +65,13 @@ export function conectar(config, emulador = false) {
     } finally {
       clearTimeout(relogio);
     }
-    if (resp.status === 404 && !corpo) return null;
+    if (resp.status === 404 && metodo === 'GET') return null;
     if (!resp.ok) {
-      const code = resp.status === 403 ? 'permission-denied' : resp.status >= 500 || resp.status === 429 ? 'unavailable' : 'invalid-argument';
+      const code =
+        resp.status === 403 ? 'permission-denied'
+        : resp.status === 401 ? 'unauthenticated'
+        : resp.status >= 500 || resp.status === 429 ? 'unavailable'
+        : 'invalid-argument';
       throw erro(dados?.error?.message || `erro ${resp.status}`, code);
     }
     return dados;
@@ -85,6 +94,23 @@ export function conectar(config, emulador = false) {
       if (!ids.length) return [];
       const resp = await pedir(':batchGet', { documents: ids.map((id) => `${banco}/${colecao}/${id}`) });
       return (resp || []).filter((r) => r.found).map((r) => lerDoc(r.found));
+    },
+
+    // Documentos em que campo == valor (as regras só deixam pedir o que a pessoa pode ver).
+    async consultar(colecao, campo, valorProcurado, limite = 100) {
+      const resp = await pedir(':runQuery', {
+        structuredQuery: {
+          from: [{ collectionId: colecao }],
+          where: { fieldFilter: { field: { fieldPath: campo }, op: 'EQUAL', value: valor(valorProcurado) } },
+          limit: limite,
+        },
+      });
+      return (resp || []).filter((r) => r.document).map((r) => lerDoc(r.document));
+    },
+
+    // Grava o documento inteiro (cria ou substitui).
+    async gravar(caminho, dados) {
+      return lerDoc(await pedir('/' + caminho, { fields: paraCampos(dados) }, 'PATCH'));
     },
 
     // Cria todos juntos (ou nenhum). escritas: [[caminho, dados], ...]

@@ -37,7 +37,7 @@ os dados ficam só no aparelho. Depois de ligar a nuvem, o app oferece enviar es
 3. Em **Authentication → Método de login**, ative **E-mail/senha**.
 4. Em **Firestore Database**, crie o banco no local `southamerica-east1 (São Paulo)`, modo produção.
 5. Em **Firestore → Regras**, cole o conteúdo de [`firestore.rules`](firestore.rules) trocando
-   `EMAIL_DO_RESPONSAVEL` pelo e-mail do responsável, e publique.
+   `EMAIL_DO_RESPONSAVEL` pelo e-mail do responsável e `ID_DO_PROJETO` pelo código do projeto, e publique.
 6. O responsável abre o app, toca em **Criar conta**, confirma o e-mail e entra. Depois libera outras pessoas em
    **Ajustes → Pessoas com acesso** e escolhe o que cada uma pode usar (vendas, fiado, despesas, estoque, produtos,
    clientes, fornecedores, relatórios, ajustes do sítio). O que fica desligado some do app da pessoa na hora.
@@ -48,17 +48,21 @@ os dados ficam só no aparelho. Depois de ligar a nuvem, o app oferece enviar es
 Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-francisco/pedido/**
 (no app: **Mais → Pedidos dos clientes → Mandar o link para clientes**).
 
-- O cliente não cria conta: entra com **nome e telefone**. Os pedidos dele ficam ligados a esse par (um resumo
-  SHA-256 dos dois), então quem souber o nome e o telefone de alguém consegue ver os pedidos dessa pessoa
-  (só os pedidos feitos pela página, nada do resto do sítio). Para ficar mais seguro dá para trocar por
-  **código por SMS** (login por telefone do Firebase), que precisa ser ligado no console do Firebase.
+- O cliente faz um **cadastro** (nome, telefone, endereço e uma senha de 4 números) e depois entra com
+  **telefone e senha**: o endereço já vem preenchido no pedido (dá para mudar, e o cadastro é atualizado).
+  Por trás, cada cliente é uma conta de e-mail e senha do Firebase com o e-mail
+  `<telefone>@cliente.<projeto>.firebaseapp.com` (ninguém recebe e-mail nesse domínio). O telefone não é
+  confirmado por SMS: quem cadastrar um número primeiro fica com ele.
+- **Esqueceu a senha:** o sítio apaga a conta do cliente no console do Firebase (Authentication → Usuários,
+  procurar pelo telefone → Excluir conta) e o cliente faz o cadastro de novo com o mesmo telefone, sem perder
+  os pedidos.
 - Os produtos que aparecem são escolhidos em **Pedidos dos clientes → Produtos e ajustes da página** (ou no
   cadastro do produto). Só vão para a página nome, unidade e preço. Lá também dá para fechar a página e colocar
   o WhatsApp do sítio.
 - O pedido chega no app como **novo**; **Transformar em venda** abre a venda já preenchida e, ao registrar,
   o cliente vê **Confirmado**. Quando a entrega é marcada como feita, o cliente vê **Entregue**.
-- As regras do banco deixam quem não tem login só ver o catálogo, enviar um pedido novo (conferido campo a campo)
-  e abrir um pedido pelo número dele.
+- As regras do banco deixam quem não tem login só ver o catálogo. O cliente logado vê e muda só o próprio
+  cadastro, faz pedidos no próprio telefone (conferidos campo a campo) e vê só os pedidos dele.
 
 ## Para quem for mexer no código
 
@@ -72,6 +76,7 @@ css/app.css                               visual (claro e escuro)
 js/main.js                                início, login e rotas
 pedido/index.html, js/loja.js             página de pedidos dos clientes (js/loja-comum.js: o que ela e o app combinam)
 js/firestore-rest.js                      Firestore pela API REST, usado só pela página de pedidos (leve e rápido)
+js/loja-conta.js                          login dos clientes da página (Firebase Authentication pela API REST)
 js/db.js                                  dados em memória + gravação local (IndexedDB) ou na nuvem (Firestore)
 js/calc.js                                regras: totais, fiado, estoque, relatórios
 js/util.js                                dinheiro, números e datas no padrão brasileiro

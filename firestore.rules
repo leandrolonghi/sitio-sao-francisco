@@ -1,10 +1,11 @@
 rules_version = '2';
 
 // Regras de segurança do banco (Firestore) do app do sítio.
-// Antes de publicar no Firebase, troque EMAIL_DO_RESPONSAVEL pelo e-mail de quem manda no app.
-// Só entra quem confirmou o e-mail e foi liberado em "Pessoas com acesso" (ou é o responsável).
-// A página de pedidos (sem login) só pode: ver o catálogo, enviar um pedido novo e
-// ver um pedido pelo número dele (que só quem fez o pedido conhece).
+// Antes de publicar no Firebase, troque EMAIL_DO_RESPONSAVEL pelo e-mail de quem manda no app
+// e ID_DO_PROJETO pelo código do projeto no Firebase.
+// No app só entra quem confirmou o e-mail e foi liberado em "Pessoas com acesso" (ou é o responsável).
+// Na página de pedidos, qualquer um vê o catálogo; o cliente cadastrado (telefone e senha) vê e muda
+// só o próprio cadastro, faz pedidos e vê só os pedidos do próprio telefone.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -27,6 +28,18 @@ service cloud.firestore {
     function dono() {
       return responsavel()
         || (membro() && get(/databases/$(database)/documents/membros/$(email())).data.papel == 'dono');
+    }
+
+    // Cliente da página de pedidos: conta com e-mail <telefone>@cliente.ID_DO_PROJETO.firebaseapp.com
+    // (domínio do próprio projeto, onde ninguém recebe e-mail).
+    function cliente() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('[0-9]{10,11}@cliente[.]ID_DO_PROJETO[.]firebaseapp[.]com');
+    }
+
+    function telefoneDoCliente() {
+      return request.auth.token.email.split('@')[0];
     }
 
     function textoOpcional(d, campo, max) {
@@ -53,6 +66,18 @@ service cloud.firestore {
         && (!('totalCent' in d) || d.totalCent == null || d.totalCent is int);
     }
 
+    function cadastroValido(tel) {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['telefone', 'nome', 'endereco', 'bairro', 'cidade', 'referencia', 'criadoEm', 'atualizadoEm'])
+        && d.telefone == tel
+        && d.nome is string && d.nome.size() >= 2 && d.nome.size() <= 80
+        && textoOpcional(d, 'endereco', 200)
+        && textoOpcional(d, 'bairro', 100)
+        && textoOpcional(d, 'cidade', 100)
+        && textoOpcional(d, 'referencia', 200)
+        && d.criadoEm is int && d.atualizadoEm is int;
+    }
+
     match /membros/{mail} {
       allow read: if responsavel() || membro();
       allow write: if dono();
@@ -68,19 +93,16 @@ service cloud.firestore {
       allow read: if true;
     }
 
-    // Página de pedidos: enviar um pedido e acompanhar pelo número dele.
-    match /pedidos/{id} {
-      allow get: if true;
-      allow create: if pedidoNovo(id);
+    // Página de pedidos: cadastro do cliente (nome e endereço), guardado pelo telefone.
+    match /cadastros/{tel} {
+      allow read: if responsavel() || membro() || (cliente() && tel == telefoneDoCliente());
+      allow create, update: if cliente() && tel == telefoneDoCliente() && cadastroValido(tel);
     }
 
-    // "Meus pedidos": números dos pedidos de cada cliente (a chave vem do nome e telefone).
-    match /contas/{chave}/pedidos/{id} {
-      allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['criadoEm'])
-        && !exists(/databases/$(database)/documents/pedidos/$(id))
-        && existsAfter(/databases/$(database)/documents/pedidos/$(id))
-        && getAfter(/databases/$(database)/documents/pedidos/$(id)).data.criadoEm == request.resource.data.criadoEm;
+    // Página de pedidos: o cliente faz pedidos no próprio telefone e vê só os dele.
+    match /pedidos/{id} {
+      allow read: if cliente() && resource.data.telefone == telefoneDoCliente();
+      allow create: if cliente() && pedidoNovo(id) && request.resource.data.telefone == telefoneDoCliente();
     }
   }
 }

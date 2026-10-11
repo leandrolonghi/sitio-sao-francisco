@@ -21,12 +21,13 @@ export function EtiquetaVenda({ venda }) {
   return html`<${Etiqueta} tipo=${TIPO_ETIQUETA[s]}>${texto}</${Etiqueta}>`;
 }
 
-export function LinhaVenda({ venda, mostrarData = true }) {
-  const itens = (venda.itens || []).map((i) => `${qtd(i.qtd)} ${i.unidade || ''} ${i.nome || ''}`.trim()).join(', ');
+export function LinhaVenda({ venda, noCliente = false }) {
+  const itens = (venda.itens || []).map((i) => `${qtd(i.qtd)} ${i.unidade || ''} ${i.nome || ''}`.trim()).join(', ') || 'sem itens';
+  const data = dataAmigavel(venda.data);
   return html`<${Linha}
     href=${'#/vendas/' + venda.id}
-    titulo=${nomeVenda(venda)}
-    sub=${(mostrarData ? dataAmigavel(venda.data) + ' · ' : '') + (itens || 'sem itens')}
+    titulo=${noCliente ? data.charAt(0).toUpperCase() + data.slice(1) : nomeVenda(venda)}
+    sub=${noCliente ? itens : data + ' · ' + itens}
     direita=${html`<span class=${venda.cancelada ? 'suave' : ''} style=${venda.cancelada ? 'text-decoration:line-through' : ''}>${dinheiro(totalVenda(venda))}</span>`}
     direitaSub=${statusVenda(venda) !== 'paga' ? html`<${EtiquetaVenda} venda=${venda} />` : ''}
   />`;
@@ -162,7 +163,7 @@ export function FormVenda({ id, query = {} }) {
         itens=${itensClientes()}
         valor=${clienteId}
         onChange=${(v) => (setClienteId(v), setErros({ ...erros, cliente: null }))}
-        placeholder="Balcão"
+        placeholder="Sem cliente"
         rotuloVazio="Venda no balcão (sem cliente)"
         onNovo=${novoCliente}
         textoNovo="Cadastrar cliente"

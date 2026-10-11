@@ -128,10 +128,10 @@ export function DetalhePessoa({ col, id }) {
         ${saldo > 0 && tel ? html`<${Botao} tipo="secundario" icone="message-circle" href=${linkWhatsApp(p.telefone, mensagemCobranca(p, abertas))}>Cobrar no WhatsApp</${Botao}>` : ''}
         <${Botao} tipo=${saldo > 0 ? 'secundario' : 'primario'} icone="shopping-cart" href=${'#/vendas/nova?cliente=' + p.id}>Nova venda</${Botao}>
       </div>
-      ${abertas.length ? html`<${Secao} titulo="Em aberto"><${Lista}>${abertas.map((v) => html`<${LinhaVenda} key=${v.id} venda=${v} />`)}</${Lista}></${Secao}>` : ''}
+      ${abertas.length ? html`<${Secao} titulo="Em aberto"><${Lista}>${abertas.map((v) => html`<${LinhaVenda} key=${v.id} venda=${v} noCliente />`)}</${Lista}></${Secao}>` : ''}
       <${Secao} titulo=${abertas.length ? 'Vendas já pagas' : 'Histórico'}>
         ${fechadas.length
-          ? html`<${Lista}>${fechadas.slice(0, 50).map((v) => html`<${LinhaVenda} key=${v.id} venda=${v} />`)}</${Lista}>`
+          ? html`<${Lista}>${fechadas.slice(0, 50).map((v) => html`<${LinhaVenda} key=${v.id} venda=${v} noCliente />`)}</${Lista}>`
           : html`<p class="suave" style="margin:0 4px">${vendas.length ? 'Nenhuma ainda.' : 'Nenhuma venda ainda.'}</p>`}
       </${Secao}>
       ${receber ? html`<${FolhaPagamento} saldoCent=${saldo} detalhe="paga primeiro as vendas mais antigas" onSalvar=${pagar} onFechar=${() => setReceber(false)} />` : ''}

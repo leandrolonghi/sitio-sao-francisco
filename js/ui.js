@@ -314,7 +314,7 @@ export function Seletor({ rotulo, itens, valor, onChange, placeholder = 'Escolhe
   const atual = itens.find((i) => i.id === valor);
   return html`<${Campo} rotulo=${rotulo} dica=${dica} erro=${erro} div>
     <button type="button" class=${'seletor-botao' + (atual ? '' : ' vazio')} onClick=${(e) => (e.preventDefault(), setAberto(true))}>
-      <span>${atual ? atual.nome : valor === '' && rotuloVazio ? rotuloVazio : placeholder}</span>
+      <span>${atual ? atual.nome : placeholder}</span>
       <${Icone} nome="chevron-right" tam=${18} />
     </button>
     ${aberto

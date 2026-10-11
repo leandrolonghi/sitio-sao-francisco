@@ -1,7 +1,8 @@
 // Estoque, produção e cadastro de produtos.
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
-import { pode } from '../estado.js';
+import { pode, app } from '../estado.js';
+import { publicarNoCatalogo } from './pedidos.js';
 import { TIPOS_MOVIMENTO, UNIDADES, qtdMovimento, estoqueBaixo } from '../calc.js';
 import { dinheiro, qtd, hoje, dataAmigavel, periodo, entre, arred3, contem } from '../util.js';
 import {
@@ -242,6 +243,7 @@ export function FormProduto({ id }) {
   const [controla, setControla] = useState(existente ? !!existente.controlaEstoque : true);
   const [minimo, setMinimo] = useState(existente?.estoqueMin ?? null);
   const [ativo, setAtivo] = useState(existente?.ativo !== false);
+  const [naLoja, setNaLoja] = useState(!!existente?.naLoja);
   const [inicial, setInicial] = useState(null);
   const [erro, setErro] = useState('');
   if (id && !existente) return html`<${NaoEncontrado} voltarPara="/produtos" />`;
@@ -256,7 +258,9 @@ export function FormProduto({ id }) {
       controlaEstoque: controla,
       estoqueMin: controla ? minimo ?? null : null,
       ativo,
+      naLoja,
     });
+    if (naLoja || existente?.naLoja) publicarNoCatalogo(doc);
     if (!existente && controla && inicial > 0) {
       banco.salvar('estoque', { data: hoje(), produtoId: doc.id, tipo: 'ajuste', qtd: inicial, obs: 'Estoque inicial' });
     }
@@ -266,6 +270,7 @@ export function FormProduto({ id }) {
   const apagar = () => {
     if (!confirmar(`Apagar ${existente.nome}? As vendas antigas continuam com o nome. Se só parou de vender, prefira desligar "Ativo".`)) return;
     banco.excluir('produtos', existente.id);
+    publicarNoCatalogo(existente, true);
     avisar('Produto apagado');
     trocar('/produtos');
   };
@@ -291,6 +296,7 @@ export function FormProduto({ id }) {
           </div>`
         : ''}
     </div>
+    ${app.modo === 'nuvem' ? html`<${Interruptor} rotulo="Aparece na página de pedidos" dica="Clientes podem pedir pelo link do sítio" valor=${naLoja} onChange=${setNaLoja} />` : ''}
     ${existente ? html`<${Interruptor} rotulo="Ativo" dica="Desligue se parou de vender" valor=${ativo} onChange=${setAtivo} />` : ''}
     ${existente ? html`<${Botao} tipo="perigo" icone="trash-2" onClick=${apagar}>Apagar produto</${Botao}>` : ''}
   </${Tela}>`;

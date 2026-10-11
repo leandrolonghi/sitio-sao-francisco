@@ -1,16 +1,19 @@
 // Service worker: guarda os arquivos do app no aparelho para abrir rápido e sem internet.
 // A lista abaixo é gerada por tools/release.mjs — rode "npm run release" (na pasta tools) antes de publicar.
 // <gerado>
-const VERSAO = '2026.10.11-0adc354a';
+const VERSAO = '2026.10.11-142b4f99';
 const ARQUIVOS = [
   "./",
   "index.html",
+  "pedido/index.html",
   "manifest.webmanifest",
   "config.js",
   "css/app.css",
   "js/calc.js",
   "js/db.js",
   "js/estado.js",
+  "js/loja-comum.js",
+  "js/loja.js",
   "js/main.js",
   "js/nuvem.js",
   "js/paginas/ajustes.js",
@@ -20,6 +23,7 @@ const ARQUIVOS = [
   "js/paginas/entregas.js",
   "js/paginas/estoque.js",
   "js/paginas/inicio.js",
+  "js/paginas/pedidos.js",
   "js/paginas/pessoas.js",
   "js/paginas/relatorios.js",
   "js/paginas/vendas.js",
@@ -72,7 +76,7 @@ self.addEventListener('fetch', (e) => {
         return resp;
       } catch (erro) {
         if (req.mode === 'navigate') {
-          const inicio = await cache.match('./');
+          const inicio = await cache.match(url.pathname.includes('/pedido/') ? 'pedido/index.html' : './');
           if (inicio) return inicio;
         }
         throw erro;

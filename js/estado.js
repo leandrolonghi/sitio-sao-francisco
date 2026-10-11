@@ -21,6 +21,7 @@ export function mudar(patch) {
 export const AREAS = [
   { id: 'vendas', nome: 'Vendas', dica: 'Registrar e ver as vendas' },
   { id: 'entregas', nome: 'Entregas', dica: 'Ver o que entregar, abrir o endereço no mapa e marcar como entregue' },
+  { id: 'pedidos', nome: 'Pedidos dos clientes', dica: 'Ver os pedidos da página e transformar em venda' },
   { id: 'receber', nome: 'A receber (fiado)', dica: 'Ver quem deve e receber pagamentos' },
   { id: 'despesas', nome: 'Despesas', dica: 'Lançar despesas e contas a pagar' },
   { id: 'estoque', nome: 'Estoque e produção', dica: 'Produção do dia, entradas, perdas e contagem' },
@@ -40,6 +41,7 @@ export function pode(area, quem = app) {
 const AREA_DA_ROTA = {
   vendas: 'vendas',
   entregas: 'entregas',
+  pedidos: 'pedidos',
   receber: 'receber',
   despesas: 'despesas',
   estoque: 'estoque',

@@ -3,6 +3,8 @@ rules_version = '2';
 // Regras de segurança do banco (Firestore) do app do sítio.
 // Antes de publicar no Firebase, troque EMAIL_DO_RESPONSAVEL pelo e-mail de quem manda no app.
 // Só entra quem confirmou o e-mail e foi liberado em "Pessoas com acesso" (ou é o responsável).
+// A página de pedidos (sem login) só pode: ver o catálogo, enviar um pedido novo e
+// ver um pedido pelo número dele (que só quem fez o pedido conhece).
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -27,6 +29,30 @@ service cloud.firestore {
         || (membro() && get(/databases/$(database)/documents/membros/$(email())).data.papel == 'dono');
     }
 
+    function textoOpcional(d, campo, max) {
+      return !(campo in d) || d[campo] == null || (d[campo] is string && d[campo].size() <= max);
+    }
+
+    // Pedido feito pela página: só como "novo", com os campos esperados e a hora certa.
+    function pedidoNovo(id) {
+      let d = request.resource.data;
+      let agora = request.time.toMillis();
+      return d.keys().hasOnly(['id', 'nome', 'telefone', 'entrega', 'endereco', 'dataDesejada', 'itens', 'totalCent', 'obs', 'status', 'criadoEm', 'atualizadoEm'])
+        && d.keys().hasAll(['id', 'nome', 'telefone', 'entrega', 'itens', 'status', 'criadoEm', 'atualizadoEm'])
+        && d.id == id
+        && d.status == 'novo'
+        && d.nome is string && d.nome.size() >= 2 && d.nome.size() <= 80
+        && d.telefone is string && d.telefone.matches('[0-9]{10,13}')
+        && d.entrega in ['entregar', 'retirar']
+        && d.itens is list && d.itens.size() >= 1 && d.itens.size() <= 40
+        && d.criadoEm is int && d.atualizadoEm == d.criadoEm
+        && d.criadoEm > agora - 43200000 && d.criadoEm < agora + 3600000
+        && textoOpcional(d, 'endereco', 300)
+        && textoOpcional(d, 'obs', 500)
+        && textoOpcional(d, 'dataDesejada', 10)
+        && (!('totalCent' in d) || d.totalCent == null || d.totalCent is int);
+    }
+
     match /membros/{mail} {
       allow read: if responsavel() || membro();
       allow write: if dono();
@@ -34,7 +60,27 @@ service cloud.firestore {
 
     match /{colecao}/{id} {
       allow read, write: if (responsavel() || membro())
-        && colecao in ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes'];
+        && colecao in ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo'];
+    }
+
+    // Página de pedidos: produtos que o sítio escolheu mostrar.
+    match /catalogo/{id} {
+      allow read: if true;
+    }
+
+    // Página de pedidos: enviar um pedido e acompanhar pelo número dele.
+    match /pedidos/{id} {
+      allow get: if true;
+      allow create: if pedidoNovo(id);
+    }
+
+    // "Meus pedidos": números dos pedidos de cada cliente (a chave vem do nome e telefone).
+    match /contas/{chave}/pedidos/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['criadoEm'])
+        && !exists(/databases/$(database)/documents/pedidos/$(id))
+        && existsAfter(/databases/$(database)/documents/pedidos/$(id))
+        && getAfter(/databases/$(database)/documents/pedidos/$(id)).data.criadoEm == request.resource.data.criadoEm;
     }
   }
 }

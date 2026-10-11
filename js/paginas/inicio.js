@@ -2,11 +2,12 @@ import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { resumoPeriodo, totalAReceber, contasAPagar, estoqueBaixo, totalVenda, fiadoVencido, saldoVenda } from '../calc.js';
 import { dinheiro, qtd, hoje, periodo, nomeMes, paraData, plural, dataCurta } from '../util.js';
-import { Tela, Secao, Lista, Linha, Numero, Icone, BotaoTopo } from '../ui.js';
+import { Tela, Secao, Lista, Linha, Numero, Icone, BotaoTopo, Etiqueta } from '../ui.js';
 import { app, estaInstalado, ehIOS, pode, podeAbrir } from '../estado.js';
 import { nomeDoSitio, estoqueAtual, produtosAtivos } from './comum.js';
 import { LinhaVenda } from './vendas.js';
 import { LinhaDespesa } from './despesas.js';
+import { pedidosNovos } from './pedidos.js';
 
 const ATALHOS = [
   ['#/vendas/nova', 'shopping-cart', 'Nova venda'],
@@ -85,6 +86,11 @@ export function Inicio() {
   return html`<${Tela} titulo=${nomeDoSitio()} direita=${html`<${BotaoTopo} icone="settings" rotulo="Ajustes" href="#/ajustes" />`}>
     ${app.novaVersao
       ? html`<div class="faixa"><${Icone} nome="refresh-cw" /><div class="faixa-corpo"><p>Tem uma versão nova do app. <button class="link" onClick=${app.novaVersao}>Atualizar agora</button></p></div></div>`
+      : ''}
+    ${pedidosNovos().length && podeAbrir('#/pedidos')
+      ? html`<a class="faixa faixa-link" href="#/pedidos"><${Icone} nome="shopping-cart" /><div class="faixa-corpo">
+          <p><strong>${plural(pedidosNovos().length, 'pedido novo', 'pedidos novos')}</strong> pela página de pedidos. Toque para ver.</p>
+        </div></a>`
       : ''}
     ${app.locaisParaEnviar > 0
       ? html`<div class="faixa atencao"><${Icone} nome="upload" /><div class="faixa-corpo"><p>Há ${plural(app.locaisParaEnviar, 'registro salvo', 'registros salvos')} só neste aparelho, de antes da nuvem.</p><p><a href="#/ajustes">Enviar para a nuvem</a></p></div></div>`
@@ -174,6 +180,7 @@ export function Inicio() {
 }
 
 const ITENS_MAIS = [
+  ['#/pedidos', 'shopping-cart', 'Pedidos dos clientes', 'Pedidos feitos pela página de pedidos'],
   ['#/estoque', 'boxes', 'Estoque e produção', 'Quanto tem, produção do dia, perdas'],
   ['#/produtos', 'package', 'Produtos', 'O que o sítio vende e os preços'],
   ['#/clientes', 'users', 'Clientes'],
@@ -182,11 +189,23 @@ const ITENS_MAIS = [
 ];
 
 export function Mais() {
-  const itens = ITENS_MAIS.filter(([href]) => podeAbrir(href));
+  const itens = ITENS_MAIS.filter(([href]) => podeAbrir(href) && (href !== '#/pedidos' || app.modo === 'nuvem'));
+  const novos = pedidosNovos().length;
   return html`<${Tela} titulo="Mais">
     ${itens.length
       ? html`<${Secao}>
-          <${Lista}>${itens.map(([href, icone, titulo, sub]) => html`<${Linha} key=${href} href=${href} icone=${icone} titulo=${titulo} sub=${sub} />`)}</${Lista}>
+          <${Lista}>
+            ${itens.map(
+              ([href, icone, titulo, sub]) => html`<${Linha}
+                key=${href}
+                href=${href}
+                icone=${icone}
+                titulo=${titulo}
+                sub=${sub}
+                direita=${href === '#/pedidos' && novos ? html`<${Etiqueta} tipo="erro">${plural(novos, 'novo', 'novos')}</${Etiqueta}>` : null}
+              />`,
+            )}
+          </${Lista}>
         </${Secao}>`
       : ''}
     <${Secao}>

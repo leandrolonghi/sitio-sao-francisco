@@ -12,6 +12,7 @@ import { ListaEstoque, LancarMovimento, EstoqueProduto, ListaProdutos, FormProdu
 import { Relatorios } from './paginas/relatorios.js';
 import { Ajustes, Acesso, AcessoPessoa } from './paginas/ajustes.js';
 import { Entregas } from './paginas/entregas.js';
+import { Pedidos, AjustesPagina, pedidosNovos } from './paginas/pedidos.js';
 import { entregasPendentes } from './calc.js';
 import { NaoEncontrado, SemPermissao } from './paginas/comum.js';
 
@@ -31,7 +32,10 @@ function Abas({ partes }) {
     if (caminho === '/mais') return DE_MAIS.includes(partes[0]);
     return partes[0] === caminho.slice(1);
   };
-  const contadores = { '/entregas': entregasPendentes(banco.lista('vendas')).length };
+  const contadores = {
+    '/entregas': entregasPendentes(banco.lista('vendas')).length,
+    '/mais': podeAbrir('#/pedidos') ? pedidosNovos().length : 0,
+  };
   return html`<nav class="abas">
     ${ABAS.filter(([c]) => podeAbrir('#' + c)).map(([c, i, r]) => html`<a href=${'#' + c} class=${ativa(c) ? 'ativa' : ''} aria-current=${ativa(c) ? 'page' : undefined}>
       <${Icone} nome=${i} tam=${24} /><span>${r}</span>
@@ -55,6 +59,8 @@ function escolherTela({ caminho, partes, query }) {
       return [html`<${AReceber} />`, true];
     case 'entregas':
       return [html`<${Entregas} />`, true];
+    case 'pedidos':
+      return b === 'pagina' ? [html`<${AjustesPagina} />`, false] : [html`<${Pedidos} />`, true];
     case 'clientes':
     case 'fornecedores':
       if (!b) return [html`<${ListaPessoas} col=${a} />`, true];

@@ -8,7 +8,7 @@ import { dirname, join, relative } from 'node:path';
 const raiz = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export function arquivosDoApp() {
-  const lista = ['index.html', 'manifest.webmanifest', 'config.js'];
+  const lista = ['index.html', 'pedido/index.html', 'manifest.webmanifest', 'config.js'];
   const varrer = (dir) => {
     for (const nome of readdirSync(join(raiz, dir)).sort()) {
       const caminho = join(dir, nome);

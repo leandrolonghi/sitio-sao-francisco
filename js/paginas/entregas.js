@@ -6,12 +6,14 @@ import { dinheiro, hoje, addDias, dataAmigavel, linkMapa, linkWaze, plural } fro
 import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, avisar } from '../ui.js';
 import { ehIOS, pode, podeAbrir } from '../estado.js';
 import { nomeVenda, resumoItens } from './comum.js';
+import { mudarPedido } from './pedidos.js';
 
 // O endereço vem sempre do cadastro do cliente.
 export const enderecoDaVenda = (v) => banco.get('clientes', v.clienteId)?.endereco || '';
 
 export function marcarEntrega(v, feita) {
   banco.salvar('vendas', { ...v, entrega: { ...v.entrega, feita, feitaEm: feita ? hoje() : null } });
+  mudarPedido(v.pedidoId, { status: feita ? 'entregue' : 'confirmado' });
   avisar(feita ? 'Entrega feita' : 'Entrega voltou para a lista');
 }
 

@@ -6,6 +6,8 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 - **A receber (fiado)** por cliente, com data combinada para pagar, aviso do que passou da data, pagamento que quita
   primeiro as vendas mais antigas e cobrança pelo WhatsApp
 - **Entregas**: vendas marcadas para entregar, com o endereço do cadastro do cliente aberto no mapa (ou Waze)
+- **Página de pedidos** para os clientes: o cliente entra com nome e telefone, escolhe os produtos e acompanha
+  o pedido; no app o pedido vira venda (e entrega) com um toque
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
 - **Estoque e produção**: produção do dia, entradas, perdas, consumo e acerto de contagem; as vendas descontam sozinhas
 - **Produtos, clientes e fornecedores**
@@ -41,6 +43,23 @@ os dados ficam só no aparelho. Depois de ligar a nuvem, o app oferece enviar es
    clientes, fornecedores, relatórios, ajustes do sítio). O que fica desligado some do app da pessoa na hora.
    As regras do banco só conferem quem pode entrar; a escolha das áreas é feita pelo app.
 
+## Página de pedidos dos clientes
+
+Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-francisco/pedido/**
+(no app: **Mais → Pedidos dos clientes → Mandar o link para clientes**).
+
+- O cliente não cria conta: entra com **nome e telefone**. Os pedidos dele ficam ligados a esse par (um resumo
+  SHA-256 dos dois), então quem souber o nome e o telefone de alguém consegue ver os pedidos dessa pessoa
+  (só os pedidos feitos pela página, nada do resto do sítio). Para ficar mais seguro dá para trocar por
+  **código por SMS** (login por telefone do Firebase), que precisa ser ligado no console do Firebase.
+- Os produtos que aparecem são escolhidos em **Pedidos dos clientes → Produtos e ajustes da página** (ou no
+  cadastro do produto). Só vão para a página nome, unidade e preço. Lá também dá para fechar a página e colocar
+  o WhatsApp do sítio.
+- O pedido chega no app como **novo**; **Transformar em venda** abre a venda já preenchida e, ao registrar,
+  o cliente vê **Confirmado**. Quando a entrega é marcada como feita, o cliente vê **Entregue**.
+- As regras do banco deixam quem não tem login só ver o catálogo, enviar um pedido novo (conferido campo a campo)
+  e abrir um pedido pelo número dele.
+
 ## Para quem for mexer no código
 
 Não tem etapa de build: são arquivos HTML, CSS e JavaScript (módulos) servidos direto.
@@ -51,6 +70,7 @@ index.html, manifest.webmanifest, sw.js   página, instalação e funcionamento 
 config.js                                 configuração do Firebase (null = modo local)
 css/app.css                               visual (claro e escuro)
 js/main.js                                início, login e rotas
+pedido/index.html, js/loja.js             página de pedidos dos clientes (js/loja-comum.js: o que ela e o app combinam)
 js/db.js                                  dados em memória + gravação local (IndexedDB) ou na nuvem (Firestore)
 js/calc.js                                regras: totais, fiado, estoque, relatórios
 js/util.js                                dinheiro, números e datas no padrão brasileiro
@@ -78,3 +98,5 @@ node ../tests/e2e-local.mjs http://localhost:8123   # teste com tela de iPhone (
 
 `http://localhost:8123/?emulador` usa os emuladores do Firebase (auth na porta 9099, Firestore na 8080,
 projeto `demo-sitio`), e `tests/e2e-nuvem.mjs` testa login, acesso, sincronização e modo offline com eles.
+`http://localhost:8123/pedido/?emulador` abre a página de pedidos nos emuladores, e `tests/e2e-pedidos.mjs`
+testa o pedido do cliente até virar venda e entrega, além de conferir o que as regras bloqueiam.

@@ -10,6 +10,7 @@ import {
   CampoDinheiro, EntradaDinheiro, EntradaQtd, AreaTexto, Texto, Interruptor, Folha, avisar, trocar, voltar, confirmar,
 } from '../ui.js';
 import { enderecoDaVenda, marcarEntrega, BotoesMapa, SemEndereco } from './entregas.js';
+import { dadosDoPedido, mudarPedido } from './pedidos.js';
 import {
   itensClientes, novoCliente, produtosAtivos, nomeVenda, NaoEncontrado, ultimaForma, guardarForma, saldoCliente,
   nomeDoSitio, estoqueAtual,
@@ -99,19 +100,22 @@ function CampoVencimento({ valor, data, onChange, erro }) {
 
 export function FormVenda({ id, query = {} }) {
   const existente = id ? banco.get('vendas', id) : null;
+  // venda feita a partir de um pedido da página de pedidos
+  const [doPedido] = useState(() => (!existente ? dadosDoPedido(query.pedido) : null));
+  const pedido = doPedido?.pedido;
   const [data, setData] = useState(existente?.data || hoje());
   const [clienteId, setClienteId] = useState(existente?.clienteId || query.cliente || '');
-  const [itens, setItens] = useState(() => (existente?.itens || []).map((i) => ({ ...i, chave: novoId() })));
+  const [itens, setItens] = useState(() => (existente?.itens || doPedido?.itens || []).map((i) => ({ ...i, chave: novoId() })));
   const [descontoCent, setDesconto] = useState(existente?.descontoCent || null);
   const [verDesconto, setVerDesconto] = useState(!!existente?.descontoCent);
   const [comoPaga, setComoPaga] = useState('agora');
   const [forma, setForma] = useState(ultimaForma());
   const [recebidoCent, setRecebido] = useState(null);
-  const [obs, setObs] = useState(existente?.obs || '');
+  const [obs, setObs] = useState(existente?.obs || pedido?.obs || '');
   const [vencimento, setVencimento] = useState(existente?.vencimento || '');
-  const [entregar, setEntregar] = useState(!!existente?.entrega);
-  const [dataEntrega, setDataEntrega] = useState(existente?.entrega?.data || existente?.data || hoje());
-  const [endereco, setEndereco] = useState(() => banco.get('clientes', existente?.clienteId || query.cliente)?.endereco || '');
+  const [entregar, setEntregar] = useState(existente ? !!existente.entrega : pedido?.entrega === 'entregar');
+  const [dataEntrega, setDataEntrega] = useState(existente?.entrega?.data || existente?.data || (pedido?.dataDesejada > hoje() ? pedido.dataDesejada : hoje()));
+  const [endereco, setEndereco] = useState(() => pedido?.endereco || banco.get('clientes', existente?.clienteId || query.cliente)?.endereco || '');
   const [erros, setErros] = useState({});
   if (id && !existente) return html`<${NaoEncontrado} voltarPara="/vendas" />`;
 
@@ -173,14 +177,17 @@ export function FormVenda({ id, query = {} }) {
       obs: obs.trim() || null,
       vencimento: ficaDevendo ? vencimento : existente?.vencimento || null,
       entrega: entregar ? { data: dataEntrega, feita: existente?.entrega?.feita || false, feitaEm: existente?.entrega?.feitaEm || null } : null,
+      pedidoId: existente?.pedidoId || pedido?.id || null,
       cancelada: existente?.cancelada || false,
     });
+    if (pedido) mudarPedido(pedido.id, { status: 'confirmado', vendaId: doc.id, totalCent: total });
+    else if (existente?.pedidoId && banco.get('pedidos', existente.pedidoId)?.totalCent !== total) mudarPedido(existente.pedidoId, { totalCent: total });
     // atualiza o preço do produto se ainda não tinha
     for (const i of limpos) {
       const p = i.produtoId && banco.get('produtos', i.produtoId);
       if (p && p.precoCent == null) banco.salvar('produtos', { ...p, precoCent: i.precoCent });
     }
-    avisar(existente ? 'Venda atualizada' : 'Venda registrada');
+    avisar(existente ? 'Venda atualizada' : pedido ? 'Pedido confirmado e venda registrada' : 'Venda registrada');
     if (existente) voltar('/vendas/' + doc.id);
     else trocar('/vendas/' + doc.id);
   }
@@ -188,14 +195,19 @@ export function FormVenda({ id, query = {} }) {
   const saldoAnterior = clienteId ? saldoCliente(clienteId) - (existente ? saldoVenda(existente) : 0) : 0;
 
   return html`<${Tela}
-    titulo=${existente ? 'Editar venda' : 'Nova venda'}
-    voltarPara=${existente ? '/vendas/' + existente.id : '/vendas'}
+    titulo=${existente ? 'Editar venda' : pedido ? 'Venda do pedido' : 'Nova venda'}
+    voltarPara=${existente ? '/vendas/' + existente.id : pedido ? '/pedidos' : '/vendas'}
     classe="formulario"
     rodape=${html`<div>
       <div class="rodape-total"><span>Total${comoPaga === 'agora' && falta > 0 && !existente ? ` · fica devendo ${dinheiro(falta)}` : ''}</span><strong>${dinheiro(total)}</strong></div>
       <${Botao} onClick=${salvar} icone="check">${existente ? 'Salvar alterações' : 'Registrar venda'}</${Botao}>
     </div>`}
   >
+    ${pedido
+      ? html`<div class="faixa"><${Icone} nome="shopping-cart" /><div class="faixa-corpo">
+          <p>Pedido de <strong>${pedido.nome}</strong> pela página. Confira os itens e os preços e registre a venda para confirmar.</p>
+        </div></div>`
+      : ''}
     <div class="dupla">
       <${CampoData} valor=${data} onChange=${setData} />
       <${Seletor}

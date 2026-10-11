@@ -96,8 +96,11 @@ export function Inicio() {
       : ''}
 
     <div class="saudacao">
-      <h2>${saudacao()}!</h2>
-      <p>${DIAS[d.getDay()]}, ${d.getDate()} de ${nomeMes(h)}</p>
+      <img src="icons/logo-256.png" alt="" width="56" height="56" />
+      <div>
+        <h2>${saudacao()}!</h2>
+        <p>${DIAS[d.getDay()]}, ${d.getDate()} de ${nomeMes(h)}</p>
+      </div>
     </div>
 
     ${atalhos.length

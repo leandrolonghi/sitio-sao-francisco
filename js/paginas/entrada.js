@@ -5,7 +5,7 @@ import { mensagemErro } from '../nuvem.js';
 
 function Marca({ sub }) {
   return html`<div class="marca">
-    <img src="icons/icon-192.png" alt="" width="84" height="84" />
+    <img src="icons/logo-256.png" alt="" width="84" height="84" />
     <h1>Sítio São Francisco</h1>
     ${sub ? html`<p>${sub}</p>` : ''}
   </div>`;

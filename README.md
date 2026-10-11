@@ -13,7 +13,8 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 
 ## Como funciona
 
-O app é um site estático publicado pelo **GitHub Pages** (grátis). Os dados ficam no **Firebase** do Google
+O app é um site estático publicado pelo **GitHub Pages** (grátis) em
+**https://leandrolonghi.github.io/sitio-sao-francisco/**. Os dados ficam no **Firebase** do Google
 (login por e-mail e banco Firestore, plano gratuito). Não precisa de computador ligado.
 
 Enquanto o Firebase não estiver configurado (`config.js` com `null`), o app funciona no **modo local**:
@@ -64,8 +65,12 @@ npm test                             # testes das regras de negócio
 node ../tests/e2e-local.mjs http://localhost:8123   # teste com tela de iPhone (Playwright)
 ```
 
-Antes de publicar uma mudança, rode `npm run release` na pasta `tools` para atualizar a versão e a lista de
-arquivos do modo offline (`sw.js`). Sem isso, quem já instalou o app continua com a versão antiga.
+### Publicar uma mudança
+
+1. Na pasta `tools`, rode `npm run release` (atualiza a versão e a lista de arquivos do modo offline em `sw.js`;
+   sem isso, quem já instalou o app continua com a versão antiga) e `npm test`.
+2. Faça o commit em `main`.
+3. O GitHub Pages publica o ramo **`gh-pages`**: envie com `git push origin main main:gh-pages`.
 
 `http://localhost:8123/?emulador` usa os emuladores do Firebase (auth na porta 9099, Firestore na 8080,
 projeto `demo-sitio`), e `tests/e2e-nuvem.mjs` testa login, acesso, sincronização e modo offline com eles.

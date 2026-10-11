@@ -2,6 +2,7 @@
 // nome e telefone, escolhe os produtos e o pedido chega no app do sítio, na tela Pedidos.
 import { html, render, useState, useEffect } from './vendor/preact.js';
 import { firebaseConfig } from '../config.js';
+import { conectar } from './firestore-rest.js';
 import { Tela, Secao, Botao, Texto, AreaTexto, CampoData, Segmentado, EntradaQtd, Etiqueta, Icone, Vazio, Avisos, avisar, useRota, ir, trocar, confirmar } from './ui.js';
 import { dinheiro, qtd, hoje, dataAmigavel, dataBR, formatarTelefone, novoId, linkWhatsApp, arred3, plural } from './util.js';
 import { INFO_LOJA, STATUS_PEDIDO, telefoneNormal, chaveCliente } from './loja-comum.js';
@@ -10,6 +11,7 @@ import { INFO_LOJA, STATUS_PEDIDO, telefoneNormal, chaveCliente } from './loja-c
 
 const CHAVE_CLIENTE = 'sitio.loja.cliente';
 const CHAVE_CARRINHO = 'sitio.loja.carrinho';
+const CHAVE_MEUS = 'sitio.loja.meus';
 
 function ler(chave, padrao) {
   try {
@@ -29,19 +31,22 @@ function gravar(chave, valor) {
 }
 
 const loja = {
-  fb: null,
-  fs: null,
+  db: null, // Firestore pela API REST (firestore-rest.js)
   cliente: ler(CHAVE_CLIENTE, null), // { nome, telefone, endereco, chave }
   carrinho: ler(CHAVE_CARRINHO, {}), // produtoId -> quantidade
   produtos: null, // null = carregando
   info: {},
   erro: null,
+  meus: ler(CHAVE_MEUS, null), // últimos pedidos vistos: { chave, lista }, para aparecer na hora
+  atualizandoMeus: false,
+  erroMeus: '',
 };
 const ouvintes = new Set();
 function mudar(patch) {
   Object.assign(loja, patch);
   if ('cliente' in patch) gravar(CHAVE_CLIENTE, loja.cliente);
   if ('carrinho' in patch) gravar(CHAVE_CARRINHO, loja.carrinho);
+  if ('meus' in patch) gravar(CHAVE_MEUS, loja.meus);
   ouvintes.forEach((f) => f());
 }
 function useLoja() {
@@ -54,26 +59,46 @@ function useLoja() {
   return loja;
 }
 
-function comPrazo(promessa, ms) {
-  return Promise.race([
-    promessa,
-    new Promise((_, erro) => setTimeout(() => erro(Object.assign(new Error('demorou'), { code: 'unavailable' })), ms)),
-  ]);
-}
+const SEM_INTERNET = 'Sem internet. Tente de novo quando tiver sinal.';
 
 async function carregarCatalogo() {
-  const { collection, getDocs } = loja.fb;
   try {
-    const snap = await comPrazo(getDocs(collection(loja.fs, 'catalogo')), 20000);
-    const docs = snap.docs.map((d) => d.data());
+    const docs = await loja.db.listar('catalogo');
     const produtos = docs
       .filter((d) => d.id !== INFO_LOJA && d.ativo && !d.excluido)
       .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));
     mudar({ produtos, info: docs.find((d) => d.id === INFO_LOJA) || {}, erro: null });
   } catch (e) {
     console.error(e);
-    mudar({ produtos: [], erro: e.code === 'unavailable' ? 'Sem internet. Tente de novo quando tiver sinal.' : 'A página de pedidos ainda não está pronta. Fale com o sítio.' });
+    mudar({ produtos: loja.produtos || [], erro: e.code === 'unavailable' ? SEM_INTERNET : 'A página de pedidos ainda não está pronta. Fale com o sítio.' });
   }
+}
+
+const maisNovoPrimeiro = (a, b) => (b.criadoEm || 0) - (a.criadoEm || 0);
+const meusPedidos = () => (loja.meus && loja.meus.chave === loja.cliente?.chave ? loja.meus.lista : null);
+
+// Busca os pedidos do cliente: a lista de números e depois todos os pedidos numa leitura só.
+let buscandoMeus = null;
+function carregarMeus() {
+  const cliente = loja.cliente;
+  if (!cliente || !loja.db) return null;
+  if (buscandoMeus) return buscandoMeus;
+  mudar({ atualizandoMeus: true, erroMeus: '' });
+  buscandoMeus = (async () => {
+    try {
+      const numeros = await loja.db.listar(`contas/${cliente.chave}/pedidos`);
+      const ids = numeros.sort(maisNovoPrimeiro).slice(0, 30).map((n) => n.id);
+      const lista = (await loja.db.lerVarios('pedidos', ids)).sort(maisNovoPrimeiro);
+      if (loja.cliente?.chave === cliente.chave) mudar({ meus: { chave: cliente.chave, lista } });
+    } catch (e) {
+      console.error(e);
+      mudar({ erroMeus: e.code === 'unavailable' ? SEM_INTERNET : 'Não consegui carregar seus pedidos.' });
+    } finally {
+      buscandoMeus = null;
+      mudar({ atualizandoMeus: false });
+    }
+  })();
+  return buscandoMeus;
 }
 
 const itensDoCarrinho = () =>
@@ -107,6 +132,7 @@ function Entrar() {
     setErros(er);
     if (Object.keys(er).length) return;
     mudar({ cliente: { nome: nome.trim().replace(/\s+/g, ' '), telefone: tel, endereco: '', chave: await chaveCliente(tel, nome) } });
+    carregarMeus();
   };
   return html`<div class="entrada">
     <${Cabecalho} sub="Faça seu pedido" />
@@ -120,7 +146,7 @@ function Entrar() {
 }
 
 function BotaoSair() {
-  const sair = () => confirmar('Sair? Para ver seus pedidos de novo, entre com o mesmo nome e telefone.') && mudar({ cliente: null, carrinho: {} });
+  const sair = () => confirmar('Sair? Para ver seus pedidos de novo, entre com o mesmo nome e telefone.') && mudar({ cliente: null, carrinho: {}, meus: null });
   return html`<button class="topo-botao" onClick=${sair} aria-label="Sair"><${Icone} nome="log-out" /></button>`;
 }
 
@@ -211,7 +237,6 @@ function Finalizar() {
     setErros(er);
     if (Object.keys(er).length) return avisar(Object.values(er)[0], 'erro');
     if (info.aberta === false) return avisar('O sítio não está recebendo pedidos agora.', 'erro');
-    const { doc, writeBatch } = loja.fb;
     const id = novoId();
     const agora = Date.now();
     const pedido = {
@@ -230,17 +255,21 @@ function Finalizar() {
     };
     setEnviando(true);
     try {
-      const lote = writeBatch(loja.fs);
-      lote.set(doc(loja.fs, 'pedidos', id), pedido);
-      lote.set(doc(loja.fs, 'contas', cliente.chave, 'pedidos', id), { criadoEm: agora });
-      await comPrazo(lote.commit(), 20000);
+      await loja.db.criarJuntos([
+        ['pedidos/' + id, pedido],
+        [`contas/${cliente.chave}/pedidos/${id}`, { criadoEm: agora }],
+      ]);
       trocar('/enviado/' + id);
-      mudar({ carrinho: {}, cliente: { ...cliente, endereco: pedido.endereco || cliente.endereco } });
+      mudar({
+        carrinho: {},
+        cliente: { ...cliente, endereco: pedido.endereco || cliente.endereco },
+        meus: { chave: cliente.chave, lista: [pedido, ...(meusPedidos() || [])] },
+      });
     } catch (e) {
       console.error(e);
       avisar(
         e.code === 'unavailable'
-          ? 'Sem internet. Tente de novo quando tiver sinal.'
+          ? SEM_INTERNET
           : 'Não consegui enviar. Confira se a data e a hora do celular estão certas e tente de novo.',
         'erro',
       );
@@ -281,10 +310,10 @@ function textoParaOSitio(p) {
 }
 
 function Enviado({ id }) {
-  const { info, fb, fs } = useLoja();
-  const [pedido, setPedido] = useState(null);
+  const { info } = useLoja();
+  const [pedido, setPedido] = useState(() => (meusPedidos() || []).find((p) => p.id === id) || null);
   useEffect(() => {
-    fb.getDoc(fb.doc(fs, 'pedidos', id)).then((s) => s.exists() && setPedido(s.data())).catch(() => {});
+    if (!pedido) loja.db.ler('pedidos/' + id).then(setPedido).catch(() => {});
   }, [id]);
   return html`<${Tela} titulo="Pedido enviado">
     <${Vazio} icone="circle-check" texto="Pedido enviado! O sítio vai confirmar e você acompanha em “Meus pedidos”.">
@@ -298,32 +327,18 @@ function Enviado({ id }) {
 }
 
 function MeusPedidos() {
-  const { cliente, fb, fs } = useLoja();
-  const [pedidos, setPedidos] = useState(null);
-  const [erro, setErro] = useState('');
-  const carregar = async () => {
-    setErro('');
-    try {
-      const snap = await comPrazo(fb.getDocs(fb.collection(fs, 'contas', cliente.chave, 'pedidos')), 20000);
-      const ids = snap.docs.map((d) => ({ id: d.id, criadoEm: d.data().criadoEm || 0 })).sort((a, b) => b.criadoEm - a.criadoEm).slice(0, 30);
-      const lidos = await Promise.all(ids.map(({ id }) => fb.getDoc(fb.doc(fs, 'pedidos', id)).then((s) => (s.exists() ? s.data() : null)).catch(() => null)));
-      setPedidos(lidos.filter(Boolean));
-    } catch (e) {
-      console.error(e);
-      setPedidos([]);
-      setErro(e.code === 'unavailable' ? 'Sem internet. Tente de novo quando tiver sinal.' : 'Não consegui carregar seus pedidos.');
-    }
-  };
+  const { atualizandoMeus, erroMeus } = useLoja();
+  const pedidos = meusPedidos();
   useEffect(() => {
-    carregar();
+    carregarMeus();
   }, []);
   return html`<${Tela} titulo="Meus pedidos" direita=${html`<${BotaoSair} />`}>
-    ${erro ? html`<div class="faixa erro"><${Icone} nome="circle-alert" /><div class="faixa-corpo"><p>${erro}</p></div></div>` : ''}
+    ${erroMeus ? html`<div class="faixa erro"><${Icone} nome="circle-alert" /><div class="faixa-corpo"><p>${erroMeus}</p></div></div>` : ''}
     ${pedidos === null
-      ? html`<p class="suave centro">Carregando…</p>`
+      ? html`<p class="suave centro">${atualizandoMeus ? 'Carregando…' : ''}</p>`
       : !pedidos.length
-        ? html`<${Vazio} icone="shopping-cart" texto="Você ainda não fez pedidos com este nome e telefone.">
-            <${Botao} href="#/" icone="plus">Fazer pedido</${Botao}>
+        ? html`<${Vazio} icone="shopping-cart" texto=${atualizandoMeus ? 'Carregando…' : 'Você ainda não fez pedidos com este nome e telefone.'}>
+            ${atualizandoMeus ? '' : html`<${Botao} href="#/" icone="plus">Fazer pedido</${Botao}>`}
           </${Vazio}>`
         : html`${pedidos.map((p) => {
               const s = STATUS_PEDIDO[p.status] || STATUS_PEDIDO.novo;
@@ -333,13 +348,15 @@ function MeusPedidos() {
                   <strong>Pedido de ${dataAmigavel(dia)}</strong>
                   <${Etiqueta} tipo=${s.tipo}>${p.status === 'entregue' && p.entrega === 'retirar' ? 'Retirado' : s.nome}</${Etiqueta}>
                 </div>
-                <ul class="itens-pedido">${p.itens.map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade} ${i.nome}</span></li>`)}</ul>
+                <ul class="itens-pedido">${(p.itens || []).map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade} ${i.nome}</span></li>`)}</ul>
                 ${p.totalCent ? html`<p><strong>${p.status === 'novo' ? 'Total estimado' : 'Total'}: ${dinheiro(p.totalCent)}</strong></p>` : ''}
                 <p class="suave">${p.entrega === 'entregar' ? 'Entregar' : 'Retirar no sítio'}${p.dataDesejada ? ' · para ' + dataBR(p.dataDesejada) : ''}</p>
                 <p class="suave">${s.texto}</p>
               </div>`;
             })}
-            <div class="botoes" style="margin-top:14px"><${Botao} tipo="secundario" icone="refresh-cw" onClick=${carregar}>Atualizar</${Botao}></div>`}
+            <div class="botoes" style="margin-top:14px">
+              <${Botao} tipo="secundario" icone="refresh-cw" onClick=${carregarMeus} desativado=${atualizandoMeus}>${atualizandoMeus ? 'Atualizando…' : 'Atualizar'}</${Botao}>
+            </div>`}
   </${Tela}>`;
 }
 
@@ -386,13 +403,10 @@ async function iniciar() {
     raiz.innerHTML = '<div class="carregando">A página de pedidos ainda não está pronta.</div>';
     return;
   }
-  const fb = await import('./vendor/firebase.js');
-  const app = fb.initializeApp(cfg.config);
-  const fs = fb.initializeFirestore(app, { localCache: fb.memoryLocalCache(), ignoreUndefinedProperties: true });
-  if (cfg.emulador) fb.connectFirestoreEmulator(fs, '127.0.0.1', 8080);
-  mudar({ fb, fs });
+  mudar({ db: conectar(cfg.config, cfg.emulador) });
   render(html`<${Pagina} /><${Avisos} />`, raiz);
   carregarCatalogo();
+  carregarMeus(); // já deixa "Meus pedidos" pronto
 }
 
 iniciar().catch((e) => {

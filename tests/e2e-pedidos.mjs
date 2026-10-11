@@ -23,6 +23,7 @@ process.on('uncaughtException', async (e) => {
   process.exit(1);
 });
 const conferir = (ok, msg) => ok || erros.push(msg);
+let semRede = false; // enquanto o teste corta a internet, erros de rede são esperados
 
 async function limparEmuladores() {
   await fetch(`${AUTH}/emulator/v1/projects/demo-sitio/accounts`, { method: 'DELETE' });
@@ -82,7 +83,7 @@ async function aparelho(nome) {
   const page = await ctx.newPage();
   telas.push([nome, page]);
   page.on('pageerror', (e) => erros.push(`${nome} pageerror: ${e.message}`));
-  page.on('console', (m) => m.type() === 'error' && erros.push(`${nome} console: ${m.text()}`));
+  page.on('console', (m) => m.type() === 'error' && !(semRede && /ERR_INTERNET_DISCONNECTED|sem conexão/.test(m.text())) && erros.push(`${nome} console: ${m.text()}`));
   page.on('dialog', (d) => d.accept());
   const foto = async (rot) => prints && page.screenshot({ path: `${prints}/p${String(++n).padStart(2, '0')}-${nome}-${rot}.png` });
   const esperar = (t, timeout = 10000) => page.getByText(t, { exact: false }).first().waitFor({ timeout });
@@ -136,6 +137,8 @@ conferir(catalogo.every((d) => !('criadoPor' in d)), 'catálogo público guarda 
 
 passo('cliente entra com nome e telefone e vê só os produtos escolhidos');
 const cliente = await aparelho('cliente');
+let baixouSdk = false;
+cliente.page.on('request', (r) => r.url().includes('vendor/firebase.js') && (baixouSdk = true));
 await cliente.page.goto(pagina);
 await cliente.esperar('Faça seu pedido');
 await cliente.foto('entrar');
@@ -232,6 +235,18 @@ await dono.foto('pedidos-historico');
 await cliente.page.click('.abas >> text=Meus pedidos');
 await cliente.esperar('Não aceito');
 await cliente.esperar('Entregue');
+
+passo('sem internet, "Meus pedidos" mostra na hora os últimos pedidos vistos');
+semRede = true;
+await cliente.ctx.setOffline(true);
+await cliente.page.click('.abas >> text=Fazer pedido');
+await cliente.page.click('.abas >> text=Meus pedidos');
+await cliente.page.locator('.cartao.pedido >> text=Não aceito').waitFor({ timeout: 300 });
+await cliente.esperar('Sem internet');
+await cliente.foto('meus-sem-internet');
+await cliente.ctx.setOffline(false);
+semRede = false;
+conferir(!baixouSdk, 'a página de pedidos baixou o Firebase completo (deveria usar só a API REST)');
 await cliente.foto('meus-dois');
 
 passo('cliente sai e entra de novo escrevendo diferente: vê os mesmos pedidos');

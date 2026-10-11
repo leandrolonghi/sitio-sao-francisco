@@ -71,6 +71,7 @@ config.js                                 configuração do Firebase (null = mod
 css/app.css                               visual (claro e escuro)
 js/main.js                                início, login e rotas
 pedido/index.html, js/loja.js             página de pedidos dos clientes (js/loja-comum.js: o que ela e o app combinam)
+js/firestore-rest.js                      Firestore pela API REST, usado só pela página de pedidos (leve e rápido)
 js/db.js                                  dados em memória + gravação local (IndexedDB) ou na nuvem (Firestore)
 js/calc.js                                regras: totais, fiado, estoque, relatórios
 js/util.js                                dinheiro, números e datas no padrão brasileiro

@@ -2,8 +2,8 @@
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { pode } from '../estado.js';
-import { saldosPorCliente, vendasAbertas, alocarPagamento, saldoVenda, totalVenda, totalAReceber } from '../calc.js';
-import { dinheiro, dataAmigavel, dataBR, formatarTelefone, soDigitos, contem, ordenarPorNome, novoId, linkWhatsApp, plural, qtd, hoje, diasEntre } from '../util.js';
+import { saldosPorCliente, vendasAbertas, alocarPagamento, saldoVenda, totalVenda, totalAReceber, situacaoVencimento, fiadoVencido } from '../calc.js';
+import { dinheiro, dataAmigavel, dataBR, dataCurta, formatarTelefone, soDigitos, contem, ordenarPorNome, novoId, linkWhatsApp, plural, qtd, hoje, diasEntre } from '../util.js';
 import { Tela, Secao, Lista, Linha, Vazio, Botao, BotaoTopo, Icone, Texto, AreaTexto, Interruptor, Numero, avisar, trocar, voltar, confirmar } from '../ui.js';
 import { NaoEncontrado, nomeDoSitio } from './comum.js';
 import { LinhaVenda, FolhaPagamento } from './vendas.js';
@@ -89,7 +89,7 @@ function mensagemCobranca(cliente, abertas) {
   const linhas = [`Olá, ${cliente.nome.split(' ')[0]}! Aqui é do ${nomeDoSitio()}.`, '', 'Segue o que está em aberto:'];
   for (const v of abertas) {
     const itens = (v.itens || []).map((i) => i.nome).join(', ');
-    linhas.push(`• ${dataBR(v.data)} – ${itens}: ${dinheiro(saldoVenda(v))}`);
+    linhas.push(`• ${dataBR(v.data)} – ${itens}: ${dinheiro(saldoVenda(v))}${v.vencimento ? ` (pagar até ${dataBR(v.vencimento)})` : ''}`);
   }
   linhas.push('', `*Total: ${dinheiro(total)}*`);
   if (ajustes.chavePix) linhas.push(`Pix: ${ajustes.chavePix}`);
@@ -121,7 +121,7 @@ export function DetalhePessoa({ col, id }) {
     };
     conteudo = html`
       <div class="numeros" style="margin-bottom:16px">
-        <${Numero} rotulo="Em aberto" valor=${dinheiro(saldo)} tipo=${saldo > 0 ? 'atencao' : ''} detalhe=${abertas.length ? plural(abertas.length, 'venda', 'vendas') : 'nada pendente'} />
+        <${Numero} rotulo="Em aberto" valor=${dinheiro(saldo)} tipo=${saldo > 0 ? 'atencao' : ''} detalhe=${abertas.length ? plural(abertas.length, 'venda', 'vendas') + textoPrazo(saldosPorCliente(abertas).get(p.id)?.vencimento, hoje(), ' · ') : 'nada pendente'} />
         <${Numero} rotulo="Comprou no total" valor=${dinheiro(totalComprado)} detalhe=${plural(vendas.filter((v) => !v.cancelada).length, 'venda', 'vendas')} />
       </div>
       <div class="botoes" style="margin-bottom:22px">
@@ -178,17 +178,27 @@ export function DetalhePessoa({ col, id }) {
 
 // ---------- A receber (fiado) ----------
 
+// " · venceu 10/10", " · vence hoje" ou " · pagar até 15/10" (vazio sem data combinada).
+function textoPrazo(vencimento, h, antes = '') {
+  const s = situacaoVencimento(vencimento, h);
+  if (!s) return '';
+  return antes + (s === 'vencida' ? 'venceu ' + dataCurta(vencimento) : s === 'hoje' ? 'vence hoje' : 'pagar até ' + dataCurta(vencimento));
+}
+
 export function AReceber() {
   const vendas = banco.lista('vendas');
   const saldos = saldosPorCliente(vendas);
   const total = totalAReceber(vendas);
   const h = hoje();
+  const vencido = fiadoVencido(vendas, h).reduce((s, v) => s + saldoVenda(v), 0);
+  // quem já passou da data combinada vem primeiro; depois quem vence antes; sem data, por valor
   const linhas = [...saldos.entries()]
     .map(([clienteId, s]) => ({ clienteId, ...s, cliente: banco.get('clientes', clienteId) }))
-    .sort((a, b) => b.saldoCent - a.saldoCent);
+    .sort((a, b) => (a.vencimento || '9999').localeCompare(b.vencimento || '9999') || b.saldoCent - a.saldoCent);
   return html`<${Tela} titulo="A receber">
     <div class="numeros" style="margin-bottom:18px">
       <${Numero} rotulo="Total em aberto (fiado)" valor=${dinheiro(total)} tipo=${total > 0 ? 'atencao' : ''} detalhe=${plural(linhas.length, 'cliente', 'clientes')} />
+      <${Numero} rotulo="Já passou da data" valor=${dinheiro(vencido)} tipo=${vencido > 0 ? 'negativo' : ''} detalhe="hora de cobrar" />
     </div>
     ${linhas.length
       ? html`<${Lista}>
@@ -198,7 +208,8 @@ export function AReceber() {
               key=${l.clienteId}
               href=${l.cliente ? '#/clientes/' + l.clienteId : '#/vendas'}
               titulo=${l.cliente?.nome || 'Sem cliente'}
-              sub=${`${plural(l.vendas, 'venda', 'vendas')} · desde ${dataAmigavel(l.maisAntiga)}${dias > 30 ? ` (${dias} dias)` : ''}`}
+              sub=${`${plural(l.vendas, 'venda', 'vendas')} · desde ${dataAmigavel(l.maisAntiga)}${dias > 30 ? ` (${dias} dias)` : ''}${textoPrazo(l.vencimento, h, ' · ')}`}
+              classe=${situacaoVencimento(l.vencimento, h) === 'vencida' ? 'vencida' : ''}
               direita=${html`<span class="atencao">${dinheiro(l.saldoCent)}</span>`}
             />`;
           })}

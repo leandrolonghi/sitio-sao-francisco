@@ -1,7 +1,7 @@
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
-import { resumoPeriodo, totalAReceber, contasAPagar, estoqueBaixo, totalVenda } from '../calc.js';
-import { dinheiro, qtd, hoje, periodo, nomeMes, paraData, plural } from '../util.js';
+import { resumoPeriodo, totalAReceber, contasAPagar, estoqueBaixo, totalVenda, fiadoVencido, saldoVenda } from '../calc.js';
+import { dinheiro, qtd, hoje, periodo, nomeMes, paraData, plural, dataCurta } from '../util.js';
 import { Tela, Secao, Lista, Linha, Numero, Icone, BotaoTopo } from '../ui.js';
 import { app, estaInstalado, ehIOS, pode, podeAbrir } from '../estado.js';
 import { nomeDoSitio, estoqueAtual, produtosAtivos } from './comum.js';
@@ -60,6 +60,13 @@ export function Inicio() {
   const aReceber = totalAReceber(vendas);
   const contas = contasAPagar(despesas, h);
   const urgentes = [...contas.vencidas, ...contas.proximas];
+  // fiado que já chegou na data combinada, junto por cliente
+  const cobrar = new Map();
+  for (const v of fiadoVencido(vendas, h)) {
+    const c = cobrar.get(v.clienteId) || { clienteId: v.clienteId, saldoCent: 0, vencimento: v.vencimento };
+    c.saldoCent += saldoVenda(v);
+    cobrar.set(v.clienteId, c);
+  }
   const baixos = estoqueBaixo(produtosAtivos(), estoqueAtual());
   const estoque = estoqueAtual();
   const ultimas = [...vendas].sort((a, b) => b.data.localeCompare(a.data) || (b.criadoEm || 0) - (a.criadoEm || 0)).slice(0, 5);
@@ -122,6 +129,23 @@ export function Inicio() {
     ${numeros.length
       ? html`<${Secao} titulo="Resumo">
           <div class="numeros">${numeros}</div>
+        </${Secao}>`
+      : ''}
+
+    ${cobrar.size && pode('receber')
+      ? html`<${Secao} titulo="Fiado para cobrar" acao=${html`<a href="#/receber">Ver tudo</a>`}>
+          <${Lista}>
+            ${[...cobrar.values()].slice(0, 5).map(
+              (c) => html`<${Linha}
+                key=${c.clienteId}
+                href=${'#/clientes/' + c.clienteId}
+                icone="calendar-clock"
+                titulo=${banco.get('clientes', c.clienteId)?.nome || 'Cliente'}
+                sub=${c.vencimento === h ? 'vence hoje' : 'venceu ' + dataCurta(c.vencimento)}
+                direita=${html`<span class="negativo">${dinheiro(c.saldoCent)}</span>`}
+              />`,
+            )}
+          </${Lista}>
         </${Secao}>`
       : ''}
 

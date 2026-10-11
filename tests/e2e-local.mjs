@@ -18,6 +18,7 @@ let n = 0;
 const foto = async (nome) => prints && page.screenshot({ path: `${prints}/${String(++n).padStart(2, '0')}-${nome}.png`, fullPage: true });
 const esperarTexto = (t) => page.getByText(t, { exact: false }).first().waitFor({ timeout: 5000 });
 const passo = (t) => console.log('•', t);
+const diasAtras = (n) => new Date(Date.now() - n * 864e5).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
 await page.goto(base + '/?local');
 await esperarTexto('Para começar');
@@ -56,21 +57,57 @@ await page.click('.chip-produto >> text=Ovos');
 await page.click('button[aria-label="Mais"]');
 await page.click('button[aria-label="Mais"]');
 await page.click('text=Fiado (paga depois)');
+await page.click('text=Registrar venda');
+await esperarTexto('Escolha a data combinada para o pagamento.');
+await page.click('text=Em 7 dias');
+await page.click('text=Entregar no endereço do cliente');
+await page.click('text=Registrar venda');
+await esperarTexto('Coloque o endereço para a entrega.');
+await page.getByPlaceholder('Rua, número, bairro, cidade').fill('Rua das Flores, 100, Centro, Campinas');
 await foto('nova-venda');
 await page.click('text=Registrar venda');
 await esperarTexto('Falta receber');
+await esperarTexto('Pagar até');
+await esperarTexto('Rua das Flores, 100');
 await foto('detalhe-venda');
 
-passo('venda paga no balcão');
+passo('cliente é obrigatório');
 await page.goto(base + '/?local#/vendas/nova');
 await page.click('.chip-produto >> text=Ovos');
 await page.click('text=Registrar venda');
+await esperarTexto('Escolha o cliente.');
+await page.click('.seletor-botao');
+await page.click('.folha .linha >> text=João da Silva');
+await page.click('text=Registrar venda');
 await esperarTexto('Paga');
+
+passo('entregas');
+await page.goto(base + '/?local#/entregas');
+await esperarTexto('1 entrega para fazer');
+if ((await page.locator('.abas a[href="#/entregas"] .contador').innerText()) !== '1') erros.push('aba Entregas sem o número 1');
+const mapa = await page.locator('a:has-text("Abrir no mapa")').getAttribute('href');
+if (!mapa.startsWith('https://maps.apple.com/?q=Rua%20das%20Flores')) erros.push('link do mapa: ' + mapa);
+const waze = await page.locator('a:has-text("Waze")').getAttribute('href');
+if (!waze.startsWith('https://waze.com/ul?q=Rua%20das%20Flores')) erros.push('link do Waze: ' + waze);
+await foto('entregas');
+await page.click('text=Marcar como entregue');
+await esperarTexto('Nenhuma entrega para fazer');
+await esperarTexto('Entregues nos últimos 7 dias');
+if (await page.locator('.abas .contador').count()) erros.push('número continua na aba Entregas');
+const cliente = await page.evaluate(() => new Promise((ok) => {
+  const r = indexedDB.open('sitio-local');
+  r.onsuccess = () => {
+    const g = r.result.transaction('docs').objectStore('docs').getAll();
+    g.onsuccess = () => ok(g.result.find((x) => x.col === 'clientes').doc);
+  };
+}));
+if (cliente.endereco !== 'Rua das Flores, 100, Centro, Campinas') erros.push('endereço não foi para o cadastro: ' + cliente.endereco);
 
 passo('a receber e pagamento parcial');
 await page.goto(base + '/?local#/receber');
 await esperarTexto('R$ 45,00');
 await foto('a-receber');
+await esperarTexto('pagar até');
 await page.click('text=João da Silva');
 await page.click('text=Receber pagamento');
 await page.getByLabel('Valor recebido').fill('20');
@@ -108,6 +145,23 @@ await esperarTexto('Vendas por produto');
 await page.goto(base + '/?local#/vendas');
 await esperarTexto('2 vendas');
 await foto('vendas');
+
+passo('fiado que passou da data aparece para cobrar');
+await page.goto(base + '/?local#/vendas/nova');
+await page.locator('input[type=date]').first().fill(diasAtras(20));
+await page.click('.seletor-botao');
+await page.click('.folha .linha >> text=João da Silva');
+await page.click('.chip-produto >> text=Ovos');
+await page.click('text=Fiado (paga depois)');
+await page.click('text=Em 7 dias');
+await page.click('text=Registrar venda');
+await esperarTexto('Venceu em');
+await page.goto(base + '/?local#/');
+await esperarTexto('Fiado para cobrar');
+await foto('inicio-cobrar');
+await page.goto(base + '/?local#/receber');
+await esperarTexto('venceu');
+await foto('a-receber-vencido');
 
 await navegador.close();
 if (erros.length) {

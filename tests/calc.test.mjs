@@ -34,7 +34,7 @@ test('saldo por cliente ignora vendas pagas e canceladas', () => {
     venda({ id: '4', clienteId: 'ana', itens: [{ qtd: 1, precoCent: 500 }], pagamentos: [{ valorCent: 500 }] }),
   ];
   const s = c.saldosPorCliente(vendas);
-  assert.deepEqual(s.get('joao'), { saldoCent: 3000, vendas: 2, maisAntiga: '2026-09-20' });
+  assert.deepEqual(s.get('joao'), { saldoCent: 3000, vendas: 2, maisAntiga: '2026-09-20', vencimento: null });
   assert.equal(s.has('ana'), false);
   assert.equal(c.totalAReceber(vendas), 3000);
 });
@@ -97,4 +97,36 @@ test('resumo do período', () => {
   assert.deepEqual(r.producao, [{ produtoId: 'ovo', qtd: 12 }]);
   assert.equal(r.porProduto[0].qtd, 2);
   assert.deepEqual(r.porForma.map((f) => f.nome), ['Dinheiro', 'Pix']);
+});
+
+test('data combinada para pagar o fiado', async () => {
+  const c = await import('../js/calc.js');
+  const v = (id, data, vencimento, extra = {}) => ({ id, data, vencimento, clienteId: 'a', itens: [{ qtd: 1, precoCent: 1000 }], pagamentos: [], ...extra });
+  const vendas = [
+    v('1', '2026-10-01', '2026-10-10'),
+    v('2', '2026-10-02', '2026-10-05'),
+    v('3', '2026-10-03', '2026-10-20'),
+    v('4', '2026-10-04', '2026-10-01', { pagamentos: [{ valorCent: 1000 }] }),
+    v('5', '2026-10-04', null),
+  ];
+  assert.equal(c.saldosPorCliente(vendas).get('a').vencimento, '2026-10-05');
+  assert.deepEqual(c.fiadoVencido(vendas, '2026-10-10').map((x) => x.id), ['2', '1']);
+  assert.equal(c.situacaoVencimento('2026-10-09', '2026-10-10'), 'vencida');
+  assert.equal(c.situacaoVencimento('2026-10-10', '2026-10-10'), 'hoje');
+  assert.equal(c.situacaoVencimento('2026-10-11', '2026-10-10'), 'a-vencer');
+  assert.equal(c.situacaoVencimento(null, '2026-10-10'), null);
+});
+
+test('entregas pendentes e feitas', async () => {
+  const c = await import('../js/calc.js');
+  const vendas = [
+    { id: 'a', data: '2026-10-02', entrega: { data: '2026-10-03', feita: false } },
+    { id: 'b', data: '2026-10-01', entrega: { data: '2026-10-01', feita: false } },
+    { id: 'c', data: '2026-10-01', entrega: { data: '2026-10-01', feita: true, feitaEm: '2026-10-02' } },
+    { id: 'd', data: '2026-10-01', entrega: { data: '2026-10-01', feita: false }, cancelada: true },
+    { id: 'e', data: '2026-10-01' },
+  ];
+  assert.deepEqual(c.entregasPendentes(vendas).map((x) => x.id), ['b', 'a']);
+  assert.deepEqual(c.entregasFeitas(vendas, '2026-10-01').map((x) => x.id), ['c']);
+  assert.deepEqual(c.entregasFeitas(vendas, '2026-10-03').map((x) => x.id), []);
 });

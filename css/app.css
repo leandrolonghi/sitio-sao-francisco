@@ -289,6 +289,7 @@ div.linha:active { background: transparent; }
 .linha-seta { color: var(--texto-suave); opacity: 0.6; margin-right: -4px; }
 .linha-nova .linha-titulo { color: var(--verde); }
 .linha.desativada { opacity: 0.55; }
+.linha.vencida .linha-sub { color: var(--vermelho); }
 
 .etiqueta {
   display: inline-block;
@@ -354,6 +355,17 @@ div.linha:active { background: transparent; }
 
 .formulario { display: flex; flex-direction: column; gap: 14px; }
 .grupo { display: flex; flex-direction: column; gap: 14px; }
+.campo-vencimento { display: flex; flex-direction: column; gap: 8px; }
+.prazos { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.entrega + .entrega { margin-top: 12px; }
+.entrega p { margin: 4px 0 0; }
+.entrega-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.entrega-topo strong { font-size: 18px; }
+.entrega-endereco { display: flex; gap: 6px; align-items: flex-start; margin: 10px 0 0 !important; font-weight: 600; }
+.entrega-endereco .icone { flex: none; margin-top: 2px; color: var(--verde); }
+.entrega .botoes { margin-top: 12px; }
+.entrega-ver { display: inline-block; margin-top: 10px; font-weight: 600; }
 .dupla { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .campo { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -567,6 +579,21 @@ select {
   font-weight: 600;
 }
 .abas a.ativa { color: var(--verde); }
+.abas a { position: relative; }
+.abas .contador {
+  position: absolute;
+  top: 6px;
+  left: calc(50% + 6px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--vermelho);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
 
 /* ---------- Folha (janela que sobe) ---------- */
 

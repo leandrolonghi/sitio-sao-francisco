@@ -81,6 +81,7 @@ await dono.page.fill('.folha .busca input', 'Maria');
 await dono.page.click('text=Cadastrar cliente “Maria”');
 await dono.page.click('.chip-produto >> text=Ovos caipira');
 await dono.page.click('text=Fiado (paga depois)');
+await dono.page.click('text=Em 7 dias');
 await dono.page.click('text=Registrar venda');
 await dono.esperar('Falta receber');
 await dono.page.waitForTimeout(1500);

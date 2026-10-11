@@ -11,11 +11,14 @@ import { ListaDespesas, FormDespesa, DetalheDespesa } from './paginas/despesas.j
 import { ListaEstoque, LancarMovimento, EstoqueProduto, ListaProdutos, FormProduto } from './paginas/estoque.js';
 import { Relatorios } from './paginas/relatorios.js';
 import { Ajustes, Acesso, AcessoPessoa } from './paginas/ajustes.js';
+import { Entregas } from './paginas/entregas.js';
+import { entregasPendentes } from './calc.js';
 import { NaoEncontrado, SemPermissao } from './paginas/comum.js';
 
 const ABAS = [
   ['/', 'house', 'Início'],
   ['/vendas', 'shopping-cart', 'Vendas'],
+  ['/entregas', 'truck', 'Entregas'],
   ['/receber', 'hand-coins', 'A receber'],
   ['/despesas', 'receipt', 'Despesas'],
   ['/mais', 'ellipsis', 'Mais'],
@@ -28,9 +31,11 @@ function Abas({ partes }) {
     if (caminho === '/mais') return DE_MAIS.includes(partes[0]);
     return partes[0] === caminho.slice(1);
   };
+  const contadores = { '/entregas': entregasPendentes(banco.lista('vendas')).length };
   return html`<nav class="abas">
     ${ABAS.filter(([c]) => podeAbrir('#' + c)).map(([c, i, r]) => html`<a href=${'#' + c} class=${ativa(c) ? 'ativa' : ''} aria-current=${ativa(c) ? 'page' : undefined}>
       <${Icone} nome=${i} tam=${24} /><span>${r}</span>
+      ${contadores[c] ? html`<span class="contador" aria-label=${contadores[c] + ' para fazer'}>${contadores[c]}</span>` : ''}
     </a>`)}
   </nav>`;
 }
@@ -48,6 +53,8 @@ function escolherTela({ caminho, partes, query }) {
       return [editar ? html`<${FormVenda} id=${b} />` : html`<${DetalheVenda} id=${b} />`, false];
     case 'receber':
       return [html`<${AReceber} />`, true];
+    case 'entregas':
+      return [html`<${Entregas} />`, true];
     case 'clientes':
     case 'fornecedores':
       if (!b) return [html`<${ListaPessoas} col=${a} />`, true];

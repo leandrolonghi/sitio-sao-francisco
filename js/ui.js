@@ -223,9 +223,10 @@ export function AreaTexto({ rotulo, valor, onChange, placeholder }) {
   </${Campo}>`;
 }
 
-export function CampoData({ rotulo = 'Data', valor, onChange, dica }) {
-  return html`<${Campo} rotulo=${rotulo} dica=${dica}>
-    <input type="date" value=${valor || ''} onInput=${(e) => onChange(e.target.value || hoje())} />
+// opcional: o campo pode ficar vazio (sem isso, apagar a data volta para hoje).
+export function CampoData({ rotulo = 'Data', valor, onChange, dica, erro, opcional }) {
+  return html`<${Campo} rotulo=${rotulo} dica=${dica} erro=${erro}>
+    <input type="date" value=${valor || ''} onInput=${(e) => onChange(e.target.value || (opcional ? '' : hoje()))} />
   </${Campo}>`;
 }
 

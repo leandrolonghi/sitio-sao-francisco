@@ -213,6 +213,16 @@ export function linkWhatsApp(telefone, mensagem = '') {
   return `https://wa.me/${n}${texto}`;
 }
 
+// Link para abrir um endereço no mapa: Mapas da Apple no iPhone, Google Maps nos outros aparelhos.
+export function linkMapa(endereco, ios = false) {
+  const q = encodeURIComponent(endereco);
+  return ios ? `https://maps.apple.com/?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`;
+}
+
+export function linkWaze(endereco) {
+  return `https://waze.com/ul?q=${encodeURIComponent(endereco)}&navigate=yes`;
+}
+
 export function formatarTelefone(t) {
   const n = soDigitos(t);
   if (n.length === 11) return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;

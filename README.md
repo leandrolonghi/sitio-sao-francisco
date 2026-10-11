@@ -2,8 +2,10 @@
 
 App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Android pelo Chrome) e também no computador.
 
-- **Vendas** com itens, desconto e forma de pagamento; venda paga, fiado ou parte paga
-- **A receber (fiado)** por cliente, com pagamento que quita primeiro as vendas mais antigas e cobrança pelo WhatsApp
+- **Vendas** sempre com cliente, itens, desconto e forma de pagamento; venda paga, fiado ou parte paga
+- **A receber (fiado)** por cliente, com data combinada para pagar, aviso do que passou da data, pagamento que quita
+  primeiro as vendas mais antigas e cobrança pelo WhatsApp
+- **Entregas**: vendas marcadas para entregar, com o endereço do cadastro do cliente aberto no mapa (ou Waze)
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
 - **Estoque e produção**: produção do dia, entradas, perdas, consumo e acerto de contagem; as vendas descontam sozinhas
 - **Produtos, clientes e fornecedores**

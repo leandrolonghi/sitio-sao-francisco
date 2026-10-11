@@ -55,11 +55,11 @@ function csv(linhas) {
 const num = (cent) => (cent / 100).toFixed(2).replace('.', ',');
 
 function exportarVendas(p) {
-  const linhas = [['Data', 'Cliente', 'Produto', 'Quantidade', 'Unidade', 'Preço', 'Valor do item', 'Total da venda', 'Pago', 'Em aberto', 'Situação']];
+  const linhas = [['Data', 'Cliente', 'Produto', 'Quantidade', 'Unidade', 'Preço', 'Valor do item', 'Total da venda', 'Pago', 'Em aberto', 'Pagar até', 'Situação', 'Entrega']];
   const vendas = banco.lista('vendas').filter((v) => entre(v.data, p.ini, p.fim)).sort((a, b) => a.data.localeCompare(b.data));
   for (const v of vendas) {
     for (const i of v.itens || []) {
-      linhas.push([dataBR(v.data), nomeVenda(v), i.nome, String(i.qtd).replace('.', ','), i.unidade, num(i.precoCent), num(valorItem(i)), num(totalVenda(v)), num(pagoVenda(v)), num(saldoVenda(v)), v.cancelada ? 'cancelada' : saldoVenda(v) ? 'em aberto' : 'paga']);
+      linhas.push([dataBR(v.data), nomeVenda(v), i.nome, String(i.qtd).replace('.', ','), i.unidade, num(i.precoCent), num(valorItem(i)), num(totalVenda(v)), num(pagoVenda(v)), num(saldoVenda(v)), dataBR(v.vencimento), v.cancelada ? 'cancelada' : saldoVenda(v) ? 'em aberto' : 'paga', v.entrega ? (v.entrega.feita ? 'entregue' : 'a entregar') : '']);
     }
   }
   baixarArquivo(`vendas-${p.ini}-a-${p.fim}.csv`, csv(linhas), 'text/csv;charset=utf-8');

@@ -83,18 +83,34 @@ export function vendasAbertas(vendas, clienteId) {
     .sort(porDataECriacao);
 }
 
-// Saldo em aberto de cada cliente: Map(clienteId -> { saldoCent, vendas, maisAntiga })
+// Saldo em aberto de cada cliente: Map(clienteId -> { saldoCent, vendas, maisAntiga, vencimento })
+// vencimento é a data combinada para pagar mais próxima entre as vendas em aberto (ou null).
 export function saldosPorCliente(vendas) {
   const mapa = new Map();
   for (const v of vendasAbertas(vendas)) {
     const chave = v.clienteId || '';
-    const atual = mapa.get(chave) || { saldoCent: 0, vendas: 0, maisAntiga: v.data };
+    const atual = mapa.get(chave) || { saldoCent: 0, vendas: 0, maisAntiga: v.data, vencimento: null };
     atual.saldoCent += saldoVenda(v);
     atual.vendas += 1;
     if (v.data < atual.maisAntiga) atual.maisAntiga = v.data;
+    if (v.vencimento && (!atual.vencimento || v.vencimento < atual.vencimento)) atual.vencimento = v.vencimento;
     mapa.set(chave, atual);
   }
   return mapa;
+}
+
+// Situação da data combinada para pagar: null (sem fiado ou sem data), 'vencida', 'hoje' ou 'a-vencer'.
+export function situacaoVencimento(vencimento, hojeIso) {
+  if (!vencimento) return null;
+  if (vencimento < hojeIso) return 'vencida';
+  return vencimento === hojeIso ? 'hoje' : 'a-vencer';
+}
+
+// Vendas fiado com a data de pagar já chegada (hoje ou antes), das mais atrasadas para as mais novas.
+export function fiadoVencido(vendas, hojeIso) {
+  return vendasAbertas(vendas)
+    .filter((v) => v.vencimento && v.vencimento <= hojeIso)
+    .sort((a, b) => a.vencimento.localeCompare(b.vencimento));
 }
 
 export function totalAReceber(vendas) {
@@ -115,6 +131,22 @@ export function alocarPagamento(abertas, valorCent) {
     }
   }
   return { partes, sobra: resta };
+}
+
+// ---------- Entregas ----------
+
+// Vendas marcadas para entregar que ainda não foram entregues, da data de entrega mais antiga para a mais nova.
+export function entregasPendentes(vendas) {
+  return vendas
+    .filter((v) => v.entrega && !v.entrega.feita && !v.cancelada)
+    .sort((a, b) => (a.entrega.data || a.data).localeCompare(b.entrega.data || b.data) || (a.criadoEm || 0) - (b.criadoEm || 0));
+}
+
+// Entregas feitas a partir de uma data, das mais novas para as mais antigas.
+export function entregasFeitas(vendas, desdeIso) {
+  return vendas
+    .filter((v) => v.entrega?.feita && !v.cancelada && (v.entrega.feitaEm || '') >= desdeIso)
+    .sort((a, b) => (b.entrega.feitaEm || '').localeCompare(a.entrega.feitaEm || ''));
 }
 
 // ---------- Estoque ----------

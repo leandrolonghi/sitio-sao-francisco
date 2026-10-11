@@ -2,13 +2,14 @@ import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { pode, podeAbrir } from '../estado.js';
 import {
-  FORMAS_PAGAMENTO, totalVenda, totalItens, pagoVenda, saldoVenda, statusVenda, ROTULO_STATUS, valorItem,
+  FORMAS_PAGAMENTO, totalVenda, totalItens, pagoVenda, saldoVenda, statusVenda, ROTULO_STATUS, valorItem, situacaoVencimento,
 } from '../calc.js';
-import { dinheiro, qtd, hoje, dataAmigavel, dataBR, periodo, entre, contem, novoId, linkWhatsApp, arred3, plural } from '../util.js';
+import { dinheiro, qtd, hoje, addDias, dataAmigavel, dataBR, dataCurta, periodo, entre, contem, novoId, linkWhatsApp, arred3, plural } from '../util.js';
 import {
   Tela, Secao, Lista, Linha, Etiqueta, Vazio, Botao, BotaoTopo, Icone, CampoData, Seletor, Segmentado, Escolha,
-  CampoDinheiro, EntradaDinheiro, EntradaQtd, AreaTexto, Texto, Folha, avisar, trocar, voltar, confirmar,
+  CampoDinheiro, EntradaDinheiro, EntradaQtd, AreaTexto, Texto, Interruptor, Folha, avisar, trocar, voltar, confirmar,
 } from '../ui.js';
+import { enderecoDaVenda, marcarEntrega, BotoesMapa, SemEndereco } from './entregas.js';
 import {
   itensClientes, novoCliente, produtosAtivos, nomeVenda, NaoEncontrado, ultimaForma, guardarForma, saldoCliente,
   nomeDoSitio, estoqueAtual,
@@ -22,13 +23,22 @@ export function EtiquetaVenda({ venda }) {
   return html`<${Etiqueta} tipo=${TIPO_ETIQUETA[s]}>${texto}</${Etiqueta}>`;
 }
 
+// "pagar até 15/10" ou "venceu 10/10", para vendas com fiado em aberto.
+export function textoVencimento(venda, h = hoje()) {
+  if (!(saldoVenda(venda) > 0) || !venda.vencimento) return '';
+  const s = situacaoVencimento(venda.vencimento, h);
+  if (s === 'vencida') return 'venceu ' + dataCurta(venda.vencimento);
+  return s === 'hoje' ? 'vence hoje' : 'pagar até ' + dataCurta(venda.vencimento);
+}
+
 export function LinhaVenda({ venda, noCliente = false }) {
   const itens = (venda.itens || []).map((i) => `${qtd(i.qtd)} ${i.unidade || ''} ${i.nome || ''}`.trim()).join(', ') || 'sem itens';
   const data = dataAmigavel(venda.data);
+  const extras = [textoVencimento(venda), venda.entrega && !venda.entrega.feita && !venda.cancelada ? 'a entregar' : ''].filter(Boolean);
   return html`<${Linha}
     href=${'#/vendas/' + venda.id}
     titulo=${noCliente ? data.charAt(0).toUpperCase() + data.slice(1) : nomeVenda(venda)}
-    sub=${noCliente ? itens : data + ' · ' + itens}
+    sub=${[noCliente ? '' : data, ...extras, itens].filter(Boolean).join(' · ')}
     direita=${html`<span class=${venda.cancelada ? 'suave' : ''} style=${venda.cancelada ? 'text-decoration:line-through' : ''}>${dinheiro(totalVenda(venda))}</span>`}
     direitaSub=${statusVenda(venda) !== 'paga' ? html`<${EtiquetaVenda} venda=${venda} />` : ''}
   />`;
@@ -74,6 +84,19 @@ export function ListaVendas({ query = {} }) {
 
 // ---------- Nova venda / editar ----------
 
+// Data combinada para o cliente pagar o fiado, com atalhos de prazo contados da data da venda.
+function CampoVencimento({ valor, data, onChange, erro }) {
+  return html`<div class="campo-vencimento">
+    <${CampoData} rotulo="Pagar até" valor=${valor} onChange=${onChange} erro=${erro} dica="Data combinada para o cliente pagar" opcional />
+    <div class="prazos">
+      ${[7, 15, 30].map((d) => {
+        const dia = addDias(data, d);
+        return html`<button type="button" class=${'filtro' + (valor === dia ? ' ativo' : '')} onClick=${() => onChange(dia)}>Em ${d} dias</button>`;
+      })}
+    </div>
+  </div>`;
+}
+
 export function FormVenda({ id, query = {} }) {
   const existente = id ? banco.get('vendas', id) : null;
   const [data, setData] = useState(existente?.data || hoje());
@@ -85,6 +108,10 @@ export function FormVenda({ id, query = {} }) {
   const [forma, setForma] = useState(ultimaForma());
   const [recebidoCent, setRecebido] = useState(null);
   const [obs, setObs] = useState(existente?.obs || '');
+  const [vencimento, setVencimento] = useState(existente?.vencimento || '');
+  const [entregar, setEntregar] = useState(!!existente?.entrega);
+  const [dataEntrega, setDataEntrega] = useState(existente?.entrega?.data || existente?.data || hoje());
+  const [endereco, setEndereco] = useState(() => banco.get('clientes', existente?.clienteId || query.cliente)?.endereco || '');
   const [erros, setErros] = useState({});
   if (id && !existente) return html`<${NaoEncontrado} voltarPara="/vendas" />`;
 
@@ -93,6 +120,12 @@ export function FormVenda({ id, query = {} }) {
   const total = Math.max(0, totalItens(itens) - (descontoCent || 0));
   const recebido = comoPaga === 'agora' ? Math.min(recebidoCent ?? total, total) : 0;
   const falta = total - recebido;
+  const ficaDevendo = existente ? total - pagoVenda(existente) > 0 : falta > 0;
+  const escolherCliente = (v) => {
+    setClienteId(v);
+    setEndereco(banco.get('clientes', v)?.endereco || '');
+    setErros({ ...erros, cliente: null });
+  };
 
   const mudarItem = (chave, mudanca) => setItens((lista) => lista.map((i) => (i.chave === chave ? { ...i, ...mudanca } : i)));
   const removerItem = (chave) => setItens((lista) => lista.filter((i) => i.chave !== chave));
@@ -110,14 +143,18 @@ export function FormVenda({ id, query = {} }) {
     else if (itens.some((i) => !(i.qtd > 0))) e.itens = 'Confira as quantidades.';
     else if (itens.some((i) => i.precoCent == null || Number.isNaN(i.precoCent))) e.itens = 'Coloque o preço de todos os itens.';
     else if (itens.some((i) => !i.produtoId && !i.nome?.trim())) e.itens = 'Dê um nome ao item avulso.';
-    const ficaDevendo = existente ? total - pagoVenda(existente) > 0 : falta > 0;
-    if (ficaDevendo && !clienteId) e.cliente = 'Para vender fiado, escolha o cliente.';
+    if (!clienteId) e.cliente = 'Escolha o cliente.';
+    if (ficaDevendo && !vencimento) e.vencimento = 'Escolha a data combinada para o pagamento.';
+    else if (ficaDevendo && vencimento < data) e.vencimento = 'A data de pagamento não pode ser antes da venda.';
+    if (entregar && !endereco.trim()) e.endereco = 'Coloque o endereço para a entrega.';
     setErros(e);
     if (Object.keys(e).length) {
       avisar(Object.values(e)[0], 'erro');
       return;
     }
     const cliente = banco.get('clientes', clienteId);
+    // o endereço da entrega fica no cadastro do cliente
+    if (entregar && cliente && endereco.trim() !== (cliente.endereco || '')) banco.salvar('clientes', { ...cliente, endereco: endereco.trim() });
     const limpos = itens.map(({ chave, ...i }) => ({ ...i, nome: i.nome?.trim() || 'Item', qtd: arred3(i.qtd) }));
     let pagamentos = existente?.pagamentos || [];
     if (!existente && comoPaga === 'agora' && recebido > 0) {
@@ -134,6 +171,8 @@ export function FormVenda({ id, query = {} }) {
       totalCent: total,
       pagamentos,
       obs: obs.trim() || null,
+      vencimento: ficaDevendo ? vencimento : existente?.vencimento || null,
+      entrega: entregar ? { data: dataEntrega, feita: existente?.entrega?.feita || false, feitaEm: existente?.entrega?.feitaEm || null } : null,
       cancelada: existente?.cancelada || false,
     });
     // atualiza o preço do produto se ainda não tinha
@@ -163,9 +202,8 @@ export function FormVenda({ id, query = {} }) {
         rotulo="Cliente"
         itens=${itensClientes()}
         valor=${clienteId}
-        onChange=${(v) => (setClienteId(v), setErros({ ...erros, cliente: null }))}
-        placeholder="Sem cliente"
-        rotuloVazio="Venda no balcão (sem cliente)"
+        onChange=${escolherCliente}
+        placeholder="Escolher cliente"
         onNovo=${novoCliente}
         textoNovo="Cadastrar cliente"
         erro=${erros.cliente}
@@ -230,9 +268,29 @@ export function FormVenda({ id, query = {} }) {
                 </div>
                 ${falta > 0 && total > 0 ? html`<p class="campo-dica atencao">Recebeu menos que o total: ${dinheiro(falta)} ficam como fiado.</p>` : ''}`
               : html`<p class="campo-dica">O valor vai para “A receber” no nome do cliente.</p>`}
+            ${ficaDevendo ? html`<${CampoVencimento} valor=${vencimento} data=${data} onChange=${(v) => (setVencimento(v), setErros({ ...erros, vencimento: null }))} erro=${erros.vencimento} />` : ''}
           </div>
         </${Secao}>`
-      : ''}
+      : ficaDevendo
+        ? html`<${CampoVencimento} valor=${vencimento} data=${data} onChange=${(v) => (setVencimento(v), setErros({ ...erros, vencimento: null }))} erro=${erros.vencimento} />`
+        : ''}
+
+    <${Secao} titulo="Entrega">
+      <div class="grupo">
+        <${Interruptor} rotulo="Entregar no endereço do cliente" dica="A venda aparece na aba Entregas" valor=${entregar} onChange=${setEntregar} />
+        ${entregar
+          ? html`<${CampoData} rotulo="Entregar em" valor=${dataEntrega} onChange=${setDataEntrega} />
+              <${Texto}
+                rotulo="Endereço"
+                valor=${endereco}
+                onChange=${(v) => (setEndereco(v), setErros({ ...erros, endereco: null }))}
+                placeholder="Rua, número, bairro, cidade"
+                dica="Fica salvo no cadastro do cliente"
+                erro=${erros.endereco}
+              />`
+          : ''}
+      </div>
+    </${Secao}>
 
     <${AreaTexto} rotulo="Observação" valor=${obs} onChange=${setObs} placeholder="Opcional" />
   </${Tela}>`;
@@ -247,7 +305,7 @@ function textoComprovante(v) {
   linhas.push('', `*Total: ${dinheiro(totalVenda(v))}*`);
   const pago = pagoVenda(v);
   if (pago > 0) linhas.push(`Pago: ${dinheiro(pago)}`);
-  if (saldoVenda(v) > 0) linhas.push(`Em aberto: ${dinheiro(saldoVenda(v))}`);
+  if (saldoVenda(v) > 0) linhas.push(`Em aberto: ${dinheiro(saldoVenda(v))}${v.vencimento ? ` (pagar até ${dataBR(v.vencimento)})` : ''}`);
   linhas.push('', 'Obrigado!');
   return linhas.join('\n');
 }
@@ -312,6 +370,8 @@ export function DetalheVenda({ id }) {
       avisar('Venda cancelada');
     }
   };
+  const endereco = v.entrega ? enderecoDaVenda(v) : '';
+  const venc = saldo > 0 ? situacaoVencimento(v.vencimento, hoje()) : null;
   const excluir = () => {
     if (!confirmar('Apagar esta venda de vez?')) return;
     banco.excluir('vendas', v.id);
@@ -324,6 +384,11 @@ export function DetalheVenda({ id }) {
       <div class="valor-grande" style=${v.cancelada ? 'text-decoration:line-through' : ''}>${dinheiro(total)}</div>
       <p>${dataAmigavel(v.data)} · ${cliente && podeAbrir('#/clientes/' + cliente.id) ? html`<a href=${'#/clientes/' + cliente.id}>${cliente.nome}</a>` : nomeVenda(v)}</p>
       <${EtiquetaVenda} venda=${v} />
+      ${venc
+        ? html`<p class=${venc === 'a-vencer' ? 'suave' : 'atencao'} style="margin-top:8px">
+            ${venc === 'vencida' ? `Venceu em ${dataBR(v.vencimento)}` : venc === 'hoje' ? 'Vence hoje' : `Pagar até ${dataBR(v.vencimento)}`}
+          </p>`
+        : ''}
     </div>
 
     ${saldo > 0 && pode('receber')
@@ -355,6 +420,24 @@ export function DetalheVenda({ id }) {
         : html`<p class="suave" style="margin:0 4px">Nenhum pagamento ainda.</p>`}
       ${saldo > 0 ? html`<p class="atencao" style="margin:10px 4px 0">Falta receber <strong>${dinheiro(saldo)}</strong>.</p>` : ''}
     </${Secao}>
+
+    ${v.entrega
+      ? html`<${Secao} titulo="Entrega">
+          <div class="cartao entrega">
+            <div class="entrega-topo">
+              <span>${v.entrega.feita ? `Entregue ${dataAmigavel(v.entrega.feitaEm)}` : `Entregar ${dataAmigavel(v.entrega.data || v.data)}`}</span>
+              <${Etiqueta} tipo=${v.entrega.feita ? 'ok' : 'info'}>${v.entrega.feita ? 'Entregue' : 'A entregar'}</${Etiqueta}>
+            </div>
+            ${endereco ? html`<p class="entrega-endereco"><${Icone} nome="map-pin" tam=${18} /><span>${endereco}</span></p>` : html`<${SemEndereco} venda=${v} />`}
+            <div class="botoes">
+              ${endereco && !v.entrega.feita ? html`<${BotoesMapa} endereco=${endereco} />` : ''}
+              <${Botao} tipo="secundario" icone=${v.entrega.feita ? 'refresh-cw' : 'check'} onClick=${() => marcarEntrega(v, !v.entrega.feita)}>
+                ${v.entrega.feita ? 'Ainda não foi entregue' : 'Marcar como entregue'}
+              </${Botao}>
+            </div>
+          </div>
+        </${Secao}>`
+      : ''}
 
     ${v.obs ? html`<${Secao} titulo="Observação"><div class="cartao">${v.obs}</div></${Secao}>` : ''}
 

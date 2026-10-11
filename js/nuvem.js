@@ -32,6 +32,9 @@ const MENSAGENS = {
   'auth/network-request-failed': 'Sem internet. Tente de novo quando tiver sinal.',
   'auth/too-many-requests': 'Muitas tentativas. Espere alguns minutos e tente de novo.',
   'auth/operation-not-allowed': 'O login por e-mail ainda não foi ativado no Firebase.',
+  'auth/configuration-not-found': 'O login ainda não foi ativado no Firebase (Authentication).',
+  'not-found': 'O banco de dados ainda não foi criado no Firebase (Firestore).',
+  'failed-precondition': 'O banco de dados ainda não está pronto no Firebase (Firestore).',
   'permission-denied': 'Sem permissão. Seu acesso ainda não foi liberado.',
   unavailable: 'Sem internet no momento.',
 };

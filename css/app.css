@@ -416,6 +416,9 @@ select {
 .segmentado button.ativo { background: var(--cartao); color: var(--texto); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
 
 .interruptor-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; cursor: pointer; }
+.interruptores { padding-top: 6px; padding-bottom: 6px; }
+.interruptores .interruptor-linha { padding: 10px 0; }
+.interruptores .interruptor-linha + .interruptor-linha { border-top: 1px solid var(--borda); }
 .interruptor-texto { display: flex; flex-direction: column; gap: 2px; }
 .interruptor { position: relative; flex: none; width: 51px; height: 31px; }
 .interruptor input { position: absolute; inset: 0; opacity: 0; margin: 0; min-height: 0; cursor: pointer; }

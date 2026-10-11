@@ -45,17 +45,25 @@ export function mensagemErro(e) {
 
 const chaveAcesso = (email) => `sitio.acesso.${email}`;
 
+// Acesso de uma pessoa: { papel: 'dono' | 'membro', areas: [...] | null }.
+function lerAcesso(dados) {
+  return { papel: dados.papel || 'membro', areas: Array.isArray(dados.areas) ? dados.areas : null };
+}
+
 export function acessoGuardado(email) {
   try {
-    return localStorage.getItem(chaveAcesso(email));
+    const bruto = localStorage.getItem(chaveAcesso(email));
+    if (!bruto) return null;
+    // versões antigas guardavam só o papel
+    return bruto.startsWith('{') ? JSON.parse(bruto) : { papel: bruto, areas: null };
   } catch {
     return null;
   }
 }
 
-function guardarAcesso(email, papel) {
+function guardarAcesso(email, acesso) {
   try {
-    if (papel) localStorage.setItem(chaveAcesso(email), papel);
+    if (acesso) localStorage.setItem(chaveAcesso(email), JSON.stringify(acesso));
     else localStorage.removeItem(chaveAcesso(email));
   } catch {
     // sem armazenamento
@@ -69,7 +77,7 @@ function comPrazo(promessa, ms) {
   ]);
 }
 
-// Confere se o e-mail pode usar o app. Devolve 'dono', 'membro' ou null.
+// Confere se o e-mail pode usar o app. Devolve o acesso ({ papel, areas }) ou null.
 // O dono principal é definido nas regras do Firestore; na primeira entrada ele se registra sozinho.
 export async function verificarAcesso(nuvem, email) {
   const { doc, getDoc, setDoc } = nuvem.fb;
@@ -77,17 +85,18 @@ export async function verificarAcesso(nuvem, email) {
   try {
     const s = await comPrazo(getDoc(ref), 15000);
     if (s.exists()) {
-      const papel = s.data().papel || 'membro';
-      guardarAcesso(email, papel);
-      return papel;
+      const acesso = lerAcesso(s.data());
+      guardarAcesso(email, acesso);
+      return acesso;
     }
   } catch (e) {
     if (e.code !== 'permission-denied') throw e;
   }
   try {
     await comPrazo(setDoc(ref, { email, papel: 'dono', criadoEm: Date.now() }), 15000);
-    guardarAcesso(email, 'dono');
-    return 'dono';
+    const acesso = { papel: 'dono', areas: null };
+    guardarAcesso(email, acesso);
+    return acesso;
   } catch (e) {
     if (e.code === 'permission-denied') {
       guardarAcesso(email, null);
@@ -95,6 +104,23 @@ export async function verificarAcesso(nuvem, email) {
     }
     throw e;
   }
+}
+
+// Acompanha o acesso da própria pessoa, para valer na hora quando o responsável muda.
+// aoMudar(acesso) quando muda; aoSumir() quando o servidor diz que o registro não existe ou não pode ser lido.
+export function ouvirMeuAcesso(nuvem, email, aoMudar, aoSumir) {
+  const { doc, onSnapshot } = nuvem.fb;
+  return onSnapshot(
+    doc(nuvem.fs, 'membros', email),
+    (s) => {
+      if (s.exists()) {
+        const acesso = lerAcesso(s.data());
+        guardarAcesso(email, acesso);
+        aoMudar(acesso);
+      } else if (!s.metadata.fromCache) aoSumir();
+    },
+    (e) => e.code === 'permission-denied' && aoSumir(),
+  );
 }
 
 export function ouvirMembros(nuvem, f) {
@@ -109,6 +135,11 @@ export function ouvirMembros(nuvem, f) {
 export function salvarMembro(nuvem, email, papel = 'membro') {
   const { doc, setDoc } = nuvem.fb;
   return setDoc(doc(nuvem.fs, 'membros', email), { email, papel, criadoEm: Date.now() });
+}
+
+export function salvarAreas(nuvem, email, areas) {
+  const { doc, setDoc } = nuvem.fb;
+  return setDoc(doc(nuvem.fs, 'membros', email), { areas }, { merge: true });
 }
 
 export function removerMembro(nuvem, email) {

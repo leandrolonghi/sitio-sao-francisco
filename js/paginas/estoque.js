@@ -1,6 +1,7 @@
 // Estoque, produção e cadastro de produtos.
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
+import { pode } from '../estado.js';
 import { TIPOS_MOVIMENTO, UNIDADES, qtdMovimento, estoqueBaixo } from '../calc.js';
 import { dinheiro, qtd, hoje, dataAmigavel, periodo, entre, arred3, contem } from '../util.js';
 import {
@@ -118,7 +119,7 @@ export function LancarMovimento({ query = {} }) {
       <${CampoData} valor=${data} onChange=${setData} />
     </div>
     <${Texto} rotulo="Observação" valor=${obs} onChange=${setObs} placeholder="Opcional" />
-    ${!itensProdutos(true).length ? html`<p class="suave">Nenhum produto controla estoque ainda. <a href="#/produtos/novo">Cadastrar produto</a></p>` : ''}
+    ${!itensProdutos(true).length ? html`<p class="suave">Nenhum produto controla estoque ainda. ${pode('produtos') ? html`<a href="#/produtos/novo">Cadastrar produto</a>` : ''}</p>` : ''}
   </${Tela}>`;
 }
 

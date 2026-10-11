@@ -2,7 +2,7 @@
 import { html, render, useState, useEffect, useRef } from './vendor/preact.js';
 import { banco, DriverLocal, DriverNuvem, lerDadosLocais } from './db.js';
 import { firebaseConfig } from '../config.js';
-import { app, mudar } from './estado.js';
+import { app, mudar, podeAbrir } from './estado.js';
 import { useRota, Avisos, Icone, avisar, instalarNavegacao } from './ui.js';
 import { Inicio, Mais } from './paginas/inicio.js';
 import { ListaVendas, FormVenda, DetalheVenda } from './paginas/vendas.js';
@@ -10,8 +10,8 @@ import { ListaPessoas, FormPessoa, DetalhePessoa, AReceber } from './paginas/pes
 import { ListaDespesas, FormDespesa, DetalheDespesa } from './paginas/despesas.js';
 import { ListaEstoque, LancarMovimento, EstoqueProduto, ListaProdutos, FormProduto } from './paginas/estoque.js';
 import { Relatorios } from './paginas/relatorios.js';
-import { Ajustes, Acesso } from './paginas/ajustes.js';
-import { NaoEncontrado } from './paginas/comum.js';
+import { Ajustes, Acesso, AcessoPessoa } from './paginas/ajustes.js';
+import { NaoEncontrado, SemPermissao } from './paginas/comum.js';
 
 const ABAS = [
   ['/', 'house', 'Início'],
@@ -29,15 +29,16 @@ function Abas({ partes }) {
     return partes[0] === caminho.slice(1);
   };
   return html`<nav class="abas">
-    ${ABAS.map(([c, i, r]) => html`<a href=${'#' + c} class=${ativa(c) ? 'ativa' : ''} aria-current=${ativa(c) ? 'page' : undefined}>
+    ${ABAS.filter(([c]) => podeAbrir('#' + c)).map(([c, i, r]) => html`<a href=${'#' + c} class=${ativa(c) ? 'ativa' : ''} aria-current=${ativa(c) ? 'page' : undefined}>
       <${Icone} nome=${i} tam=${24} /><span>${r}</span>
     </a>`)}
   </nav>`;
 }
 
-function escolherTela({ partes, query }) {
+function escolherTela({ caminho, partes, query }) {
   const [a, b, c] = partes;
   const editar = c === 'editar';
+  if (!podeAbrir('#' + caminho)) return [html`<${SemPermissao} />`, true];
   switch (a) {
     case undefined:
       return [html`<${Inicio} />`, true];
@@ -68,7 +69,7 @@ function escolherTela({ partes, query }) {
     case 'mais':
       return [html`<${Mais} />`, true];
     case 'ajustes':
-      if (b === 'acesso') return [html`<${Acesso} />`, false];
+      if (b === 'acesso') return [c ? html`<${AcessoPessoa} email=${decodeURIComponent(c)} />` : html`<${Acesso} />`, false];
       return [html`<${Ajustes} />`, true];
     default:
       return [html`<${NaoEncontrado} texto="Esta página não existe." />`, false];
@@ -101,48 +102,55 @@ function RaizNuvem({ nuvem }) {
   useEffect(() => {
     let ativo = true;
     let modulos;
+    let pararAcesso = null;
     const entrar = async (usuario) => {
+      pararAcesso?.();
+      pararAcesso = null;
       modulos ||= {
         entrada: await import('./paginas/entrada.js'),
         nuvem: await import('./nuvem.js'),
       };
       if (!ativo) return;
-      const { verificarAcesso, acessoGuardado, mensagemErro } = modulos.nuvem;
+      const { verificarAcesso, acessoGuardado, ouvirMeuAcesso, mensagemErro } = modulos.nuvem;
       if (!usuario) {
         banco.parar();
-        mudar({ usuario: null, papel: null });
+        mudar({ usuario: null, papel: null, areas: null });
         return setEstado({ fase: 'login', modulos });
       }
       if (!usuario.emailVerified) return setEstado({ fase: 'verificar', usuario, modulos });
       const email = usuario.email.toLowerCase();
-      const abrir = async (papel) => {
+      const semAcesso = () => {
+        pararAcesso?.();
+        pararAcesso = null;
+        banco.parar();
+        setEstado({ fase: 'sem-acesso', usuario, modulos });
+      };
+      const abrir = async (acesso) => {
         banco.usuario = { email };
-        mudar({ usuario: { email }, papel });
+        mudar({ usuario: { email }, papel: acesso.papel, areas: acesso.areas });
         await banco.iniciar(new DriverNuvem(nuvem), 'nuvem');
         setEstado({ fase: 'app' });
         lerDadosLocais()
           .then((r) => mudar({ locaisParaEnviar: r.length }))
           .catch(() => {});
+        // o que a pessoa pode usar vale na hora em que o responsável muda (ou tira o acesso)
+        pararAcesso = ouvirMeuAcesso(
+          nuvem,
+          email,
+          (a) => mudar({ papel: a.papel, areas: a.areas }),
+          () =>
+            verificarAcesso(nuvem, email)
+              .then((a) => (a ? mudar({ papel: a.papel, areas: a.areas }) : semAcesso()))
+              .catch(() => {}),
+        );
       };
       const guardado = acessoGuardado(email);
-      if (guardado) {
-        await abrir(guardado);
-        // confere de novo em segundo plano (o acesso pode ter sido tirado)
-        verificarAcesso(nuvem, email)
-          .then((papel) => {
-            if (!papel) {
-              banco.parar();
-              setEstado({ fase: 'sem-acesso', usuario, modulos });
-            } else if (papel !== guardado) mudar({ papel });
-          })
-          .catch(() => {});
-        return;
-      }
+      if (guardado) return abrir(guardado);
       setEstado({ fase: 'carregando', texto: 'Conferindo seu acesso…' });
       try {
-        const papel = await verificarAcesso(nuvem, email);
-        if (!papel) return setEstado({ fase: 'sem-acesso', usuario, modulos });
-        await abrir(papel);
+        const acesso = await verificarAcesso(nuvem, email);
+        if (!acesso) return setEstado({ fase: 'sem-acesso', usuario, modulos });
+        await abrir(acesso);
       } catch (e) {
         setEstado({ fase: 'sem-acesso', usuario, modulos, erro: mensagemErro(e) });
       }
@@ -152,6 +160,7 @@ function RaizNuvem({ nuvem }) {
     reentrarRef.current = () => entrar(nuvem.auth.currentUser);
     return () => {
       ativo = false;
+      pararAcesso?.();
       parar();
     };
   }, []);

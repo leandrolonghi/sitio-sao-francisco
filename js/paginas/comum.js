@@ -78,6 +78,14 @@ export function NaoEncontrado({ voltarPara = '/', texto = 'Não encontrei esse r
   </${Tela}>`;
 }
 
+export function SemPermissao() {
+  return html`<${Tela} titulo="Sem acesso">
+    <${Vazio} icone="ban" texto="Você não tem acesso a esta parte do app. Se precisar, peça ao responsável pelo sítio para liberar.">
+      <${Botao} tipo="secundario" href="#/">Ir para o início</${Botao}>
+    </${Vazio}>
+  </${Tela}>`;
+}
+
 // Lembra a última forma de pagamento usada neste aparelho.
 export function ultimaForma() {
   try {

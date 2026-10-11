@@ -3,10 +3,17 @@ import { banco } from '../db.js';
 import { resumoPeriodo, totalAReceber, contasAPagar, estoqueBaixo, totalVenda } from '../calc.js';
 import { dinheiro, qtd, hoje, periodo, nomeMes, paraData, plural } from '../util.js';
 import { Tela, Secao, Lista, Linha, Numero, Icone, BotaoTopo } from '../ui.js';
-import { app, estaInstalado, ehIOS } from '../estado.js';
+import { app, estaInstalado, ehIOS, pode, podeAbrir } from '../estado.js';
 import { nomeDoSitio, estoqueAtual, produtosAtivos } from './comum.js';
 import { LinhaVenda } from './vendas.js';
 import { LinhaDespesa } from './despesas.js';
+
+const ATALHOS = [
+  ['#/vendas/nova', 'shopping-cart', 'Nova venda'],
+  ['#/receber', 'hand-coins', 'Receber'],
+  ['#/despesas/nova', 'receipt', 'Despesa'],
+  ['#/estoque/lancar?tipo=producao', 'sprout', 'Produção'],
+];
 
 const DIAS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
 
@@ -56,7 +63,16 @@ export function Inicio() {
   const baixos = estoqueBaixo(produtosAtivos(), estoqueAtual());
   const estoque = estoqueAtual();
   const ultimas = [...vendas].sort((a, b) => b.data.localeCompare(a.data) || (b.criadoEm || 0) - (a.criadoEm || 0)).slice(0, 5);
-  const semNada = !banco.lista('produtos').length && !vendas.length;
+  const semNada = !banco.lista('produtos').length && !vendas.length && pode('produtos');
+  const atalhos = ATALHOS.filter(([href]) => podeAbrir(href));
+  const numeros = [
+    pode('vendas') && html`<${Numero} rotulo="Vendas hoje" valor=${dinheiro(vendasHoje.reduce((s, v) => s + totalVenda(v), 0))} detalhe=${plural(vendasHoje.length, 'venda', 'vendas')} href="#/vendas?filtro=hoje" />`,
+    pode('receber') && html`<${Numero} rotulo="A receber (fiado)" valor=${dinheiro(aReceber)} tipo=${aReceber ? 'atencao' : ''} href="#/receber" />`,
+    pode('vendas') && html`<${Numero} rotulo=${'Vendas em ' + nomeMes(h)} valor=${dinheiro(rMes.vendidoCent)} href="#/vendas" />`,
+    pode('despesas') && html`<${Numero} rotulo=${'Despesas em ' + nomeMes(h)} valor=${dinheiro(rMes.despesasCent)} href="#/despesas" />`,
+    pode('relatorios') &&
+      html`<${Numero} rotulo=${'Resultado de ' + nomeMes(h)} valor=${dinheiro(rMes.resultadoCent)} tipo=${rMes.resultadoCent >= 0 ? 'positivo' : 'negativo'} detalhe="vendas menos despesas" href="#/relatorios" classe="largo" />`,
+  ].filter(Boolean);
   const mostrarInstalar = ehIOS() && !estaInstalado() && !lerDispensado('instalar');
 
   return html`<${Tela} titulo=${nomeDoSitio()} direita=${html`<${BotaoTopo} icone="settings" rotulo="Ajustes" href="#/ajustes" />`}>
@@ -84,12 +100,11 @@ export function Inicio() {
       <p>${DIAS[d.getDay()]}, ${d.getDate()} de ${nomeMes(h)}</p>
     </div>
 
-    <div class="atalhos">
-      <a class="atalho" href="#/vendas/nova"><span class="bola"><${Icone} nome="shopping-cart" /></span>Nova venda</a>
-      <a class="atalho" href="#/receber"><span class="bola"><${Icone} nome="hand-coins" /></span>Receber</a>
-      <a class="atalho" href="#/despesas/nova"><span class="bola"><${Icone} nome="receipt" /></span>Despesa</a>
-      <a class="atalho" href="#/estoque/lancar?tipo=producao"><span class="bola"><${Icone} nome="sprout" /></span>Produção</a>
-    </div>
+    ${atalhos.length
+      ? html`<div class="atalhos">
+          ${atalhos.map(([href, icone, nome]) => html`<a class="atalho" href=${href}><span class="bola"><${Icone} nome=${icone} /></span>${nome}</a>`)}
+        </div>`
+      : ''}
 
     ${semNada
       ? html`<${Secao} titulo="Para começar">
@@ -101,23 +116,19 @@ export function Inicio() {
         </${Secao}>`
       : ''}
 
-    <${Secao} titulo="Resumo">
-      <div class="numeros">
-        <${Numero} rotulo="Vendas hoje" valor=${dinheiro(vendasHoje.reduce((s, v) => s + totalVenda(v), 0))} detalhe=${plural(vendasHoje.length, 'venda', 'vendas')} href="#/vendas?filtro=hoje" />
-        <${Numero} rotulo="A receber (fiado)" valor=${dinheiro(aReceber)} tipo=${aReceber ? 'atencao' : ''} href="#/receber" />
-        <${Numero} rotulo=${'Vendas em ' + nomeMes(h)} valor=${dinheiro(rMes.vendidoCent)} href="#/vendas" />
-        <${Numero} rotulo=${'Despesas em ' + nomeMes(h)} valor=${dinheiro(rMes.despesasCent)} href="#/despesas" />
-        <${Numero} rotulo=${'Resultado de ' + nomeMes(h)} valor=${dinheiro(rMes.resultadoCent)} tipo=${rMes.resultadoCent >= 0 ? 'positivo' : 'negativo'} detalhe="vendas menos despesas" href="#/relatorios" classe="largo" />
-      </div>
-    </${Secao}>
+    ${numeros.length
+      ? html`<${Secao} titulo="Resumo">
+          <div class="numeros">${numeros}</div>
+        </${Secao}>`
+      : ''}
 
-    ${urgentes.length
+    ${urgentes.length && pode('despesas')
       ? html`<${Secao} titulo="Contas para pagar" acao=${html`<a href="#/despesas?filtro=a-pagar">Ver todas</a>`}>
           <${Lista}>${urgentes.slice(0, 4).map((x) => html`<${LinhaDespesa} key=${x.id} d=${x} />`)}</${Lista}>
         </${Secao}>`
       : ''}
 
-    ${baixos.length
+    ${baixos.length && pode('estoque')
       ? html`<${Secao} titulo="Estoque baixo" acao=${html`<a href="#/estoque">Estoque</a>`}>
           <${Lista}>
             ${baixos.map((p) => html`<${Linha} key=${p.id} href=${'#/estoque/' + p.id} icone="package" titulo=${p.nome} sub=${`mínimo ${qtd(p.estoqueMin)} ${p.unidade}`} direita=${html`<span class="atencao">${qtd(estoque.get(p.id) || 0)} ${p.unidade}</span>`} />`)}
@@ -125,7 +136,7 @@ export function Inicio() {
         </${Secao}>`
       : ''}
 
-    ${ultimas.length
+    ${ultimas.length && pode('vendas')
       ? html`<${Secao} titulo="Últimas vendas" acao=${html`<a href="#/vendas">Ver todas</a>`}>
           <${Lista}>${ultimas.map((v) => html`<${LinhaVenda} key=${v.id} venda=${v} />`)}</${Lista}>
         </${Secao}>`
@@ -135,20 +146,25 @@ export function Inicio() {
   </${Tela}>`;
 }
 
+const ITENS_MAIS = [
+  ['#/estoque', 'boxes', 'Estoque e produção', 'Quanto tem, produção do dia, perdas'],
+  ['#/produtos', 'package', 'Produtos', 'O que o sítio vende e os preços'],
+  ['#/clientes', 'users', 'Clientes'],
+  ['#/fornecedores', 'truck', 'Fornecedores'],
+  ['#/relatorios', 'chart-column', 'Relatórios', 'Vendas, despesas, resultado e planilhas'],
+];
+
 export function Mais() {
+  const itens = ITENS_MAIS.filter(([href]) => podeAbrir(href));
   return html`<${Tela} titulo="Mais">
+    ${itens.length
+      ? html`<${Secao}>
+          <${Lista}>${itens.map(([href, icone, titulo, sub]) => html`<${Linha} key=${href} href=${href} icone=${icone} titulo=${titulo} sub=${sub} />`)}</${Lista}>
+        </${Secao}>`
+      : ''}
     <${Secao}>
       <${Lista}>
-        <${Linha} href="#/estoque" icone="boxes" titulo="Estoque e produção" sub="Quanto tem, produção do dia, perdas" />
-        <${Linha} href="#/produtos" icone="package" titulo="Produtos" sub="O que o sítio vende e os preços" />
-        <${Linha} href="#/clientes" icone="users" titulo="Clientes" />
-        <${Linha} href="#/fornecedores" icone="truck" titulo="Fornecedores" />
-        <${Linha} href="#/relatorios" icone="chart-column" titulo="Relatórios" sub="Vendas, despesas, resultado e planilhas" />
-      </${Lista}>
-    </${Secao}>
-    <${Secao}>
-      <${Lista}>
-        <${Linha} href="#/ajustes" icone="settings" titulo="Ajustes" sub="Nome do sítio, Pix, categorias, cópia de segurança" />
+        <${Linha} href="#/ajustes" icone="settings" titulo="Ajustes" sub=${pode('ajustes') ? 'Nome do sítio, Pix, categorias, cópia de segurança' : 'Sua conta e instalar no celular'} />
       </${Lista}>
     </${Secao}>
     <p class="centro"><${Sincronia} /></p>

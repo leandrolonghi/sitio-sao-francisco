@@ -35,7 +35,9 @@ os dados ficam só no aparelho. Depois de ligar a nuvem, o app oferece enviar es
 5. Em **Firestore → Regras**, cole o conteúdo de [`firestore.rules`](firestore.rules) trocando
    `EMAIL_DO_RESPONSAVEL` pelo e-mail do responsável, e publique.
 6. O responsável abre o app, toca em **Criar conta**, confirma o e-mail e entra. Depois libera outras pessoas em
-   **Ajustes → Pessoas com acesso**.
+   **Ajustes → Pessoas com acesso** e escolhe o que cada uma pode usar (vendas, fiado, despesas, estoque, produtos,
+   clientes, fornecedores, relatórios, ajustes do sítio). O que fica desligado some do app da pessoa na hora.
+   As regras do banco só conferem quem pode entrar; a escolha das áreas é feita pelo app.
 
 ## Para quem for mexer no código
 

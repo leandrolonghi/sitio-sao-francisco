@@ -1,6 +1,7 @@
 // Clientes, fornecedores e a tela "A receber" (fiado).
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
+import { pode } from '../estado.js';
 import { saldosPorCliente, vendasAbertas, alocarPagamento, saldoVenda, totalVenda, totalAReceber } from '../calc.js';
 import { dinheiro, dataAmigavel, dataBR, formatarTelefone, soDigitos, contem, ordenarPorNome, novoId, linkWhatsApp, plural, qtd, hoje, diasEntre } from '../util.js';
 import { Tela, Secao, Lista, Linha, Vazio, Botao, BotaoTopo, Icone, Texto, AreaTexto, Interruptor, Numero, avisar, trocar, voltar, confirmar } from '../ui.js';
@@ -124,8 +125,8 @@ export function DetalhePessoa({ col, id }) {
         <${Numero} rotulo="Comprou no total" valor=${dinheiro(totalComprado)} detalhe=${plural(vendas.filter((v) => !v.cancelada).length, 'venda', 'vendas')} />
       </div>
       <div class="botoes" style="margin-bottom:22px">
-        ${saldo > 0 ? html`<${Botao} icone="hand-coins" onClick=${() => setReceber(true)}>Receber pagamento</${Botao}>` : ''}
-        ${saldo > 0 && tel ? html`<${Botao} tipo="secundario" icone="message-circle" href=${linkWhatsApp(p.telefone, mensagemCobranca(p, abertas))}>Cobrar no WhatsApp</${Botao}>` : ''}
+        ${saldo > 0 && pode('receber') ? html`<${Botao} icone="hand-coins" onClick=${() => setReceber(true)}>Receber pagamento</${Botao}>` : ''}
+        ${saldo > 0 && tel && pode('receber') ? html`<${Botao} tipo="secundario" icone="message-circle" href=${linkWhatsApp(p.telefone, mensagemCobranca(p, abertas))}>Cobrar no WhatsApp</${Botao}>` : ''}
         <${Botao} tipo=${saldo > 0 ? 'secundario' : 'primario'} icone="shopping-cart" href=${'#/vendas/nova?cliente=' + p.id}>Nova venda</${Botao}>
       </div>
       ${abertas.length ? html`<${Secao} titulo="Em aberto"><${Lista}>${abertas.map((v) => html`<${LinhaVenda} key=${v.id} venda=${v} noCliente />`)}</${Lista}></${Secao}>` : ''}

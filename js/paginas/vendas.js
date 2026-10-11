@@ -1,5 +1,6 @@
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
+import { pode, podeAbrir } from '../estado.js';
 import {
   FORMAS_PAGAMENTO, totalVenda, totalItens, pagoVenda, saldoVenda, statusVenda, ROTULO_STATUS, valorItem,
 } from '../calc.js';
@@ -184,7 +185,7 @@ export function FormVenda({ id, query = {} }) {
             })}
             <button type="button" class="chip-produto" onClick=${adicionarAvulso}>+ Outro item<small>fora da lista</small></button>
           </div>`
-        : html`<div class="faixa"><${Icone} nome="package" /><div class="faixa-corpo"><p>Você ainda não cadastrou produtos.</p><p><a href="#/produtos/novo">Cadastrar produto</a> ou <button class="link" onClick=${adicionarAvulso}>lançar item avulso</button>.</p></div></div>`}
+        : html`<div class="faixa"><${Icone} nome="package" /><div class="faixa-corpo"><p>Você ainda não cadastrou produtos.</p><p>${pode('produtos') ? html`<a href="#/produtos/novo">Cadastrar produto</a> ou ` : ''}<button class="link" onClick=${adicionarAvulso}>lançar item avulso</button>.</p></div></div>`}
     </${Secao}>
 
     ${itens.length
@@ -321,11 +322,11 @@ export function DetalheVenda({ id }) {
   return html`<${Tela} titulo="Venda" voltarPara="/vendas" direita=${html`<${BotaoTopo} icone="pencil" rotulo="Editar" href=${'#/vendas/' + v.id + '/editar'} />`}>
     <div class="detalhe-topo">
       <div class="valor-grande" style=${v.cancelada ? 'text-decoration:line-through' : ''}>${dinheiro(total)}</div>
-      <p>${dataAmigavel(v.data)} · ${cliente ? html`<a href=${'#/clientes/' + cliente.id}>${cliente.nome}</a>` : nomeVenda(v)}</p>
+      <p>${dataAmigavel(v.data)} · ${cliente && podeAbrir('#/clientes/' + cliente.id) ? html`<a href=${'#/clientes/' + cliente.id}>${cliente.nome}</a>` : nomeVenda(v)}</p>
       <${EtiquetaVenda} venda=${v} />
     </div>
 
-    ${saldo > 0
+    ${saldo > 0 && pode('receber')
       ? html`<div class="botoes" style="margin-bottom:22px">
           <${Botao} icone="hand-coins" onClick=${() => setReceber(true)}>Receber pagamento</${Botao}>
         </div>`

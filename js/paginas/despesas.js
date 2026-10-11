@@ -1,5 +1,6 @@
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
+import { podeAbrir } from '../estado.js';
 import { FORMAS_PAGAMENTO, contasAPagar, situacaoDespesa } from '../calc.js';
 import { dinheiro, hoje, addDias, dataAmigavel, dataBR, periodo, entre, contem, plural } from '../util.js';
 import {
@@ -179,7 +180,7 @@ export function DetalheDespesa({ id }) {
       <dl class="pares">
         <dt>Categoria</dt><dd>${d.categoria}</dd>
         <dt>Data</dt><dd>${dataBR(d.data)}</dd>
-        ${fornecedor ? html`<dt>Fornecedor</dt><dd><a href=${'#/fornecedores/' + fornecedor.id}>${fornecedor.nome}</a></dd>` : ''}
+        ${fornecedor ? html`<dt>Fornecedor</dt><dd>${podeAbrir('#/fornecedores/' + fornecedor.id) ? html`<a href=${'#/fornecedores/' + fornecedor.id}>${fornecedor.nome}</a>` : fornecedor.nome}</dd>` : ''}
         ${d.pago
           ? html`<dt>Paga em</dt><dd>${dataBR(d.dataPagamento || d.data)}</dd><dt>Forma</dt><dd>${d.forma || '—'}</dd>`
           : html`<dt>Vencimento</dt><dd>${dataBR(d.vencimento || d.data)}</dd>`}

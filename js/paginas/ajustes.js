@@ -2,11 +2,11 @@ import { html, useState, useEffect, useRef } from '../vendor/preact.js';
 import { banco, lerDadosLocais, apagarDadosLocais, COLECOES } from '../db.js';
 import { CATEGORIAS_PADRAO } from '../calc.js';
 import { hoje, plural } from '../util.js';
-import { Tela, Secao, Lista, Linha, Botao, Texto, Campo, Icone, avisar, baixarArquivo, confirmar, voltar } from '../ui.js';
-import { app, mudar, estaInstalado } from '../estado.js';
+import { Tela, Secao, Lista, Linha, Botao, Texto, Campo, Interruptor, Vazio, avisar, baixarArquivo, confirmar, ir, trocar } from '../ui.js';
+import { app, mudar, estaInstalado, pode, AREAS } from '../estado.js';
 import { nomeDoSitio, categoriasDespesa } from './comum.js';
 import { Sincronia } from './inicio.js';
-import { ouvirMembros, salvarMembro, removerMembro, mensagemErro } from '../nuvem.js';
+import { ouvirMembros, salvarMembro, salvarAreas, removerMembro, mensagemErro } from '../nuvem.js';
 import { VERSAO } from '../versao.js';
 
 export function Ajustes() {
@@ -77,14 +77,14 @@ export function Ajustes() {
     ${app.modo === 'nuvem'
       ? html`<${Secao} titulo="Sua conta">
           <${Lista}>
-            <${Linha} icone="users" titulo=${app.usuario?.email} sub=${app.papel === 'dono' ? 'Responsável' : 'Acesso liberado'} />
-            ${app.papel === 'dono' ? html`<${Linha} href="#/ajustes/acesso" icone="user-plus" titulo="Pessoas com acesso" sub="Liberar o app para família ou funcionários" />` : ''}
+            <${Linha} icone="users" titulo=${app.usuario?.email} sub=${app.papel === 'dono' ? 'Responsável' : resumoAreas(app.areas)} />
+            ${app.papel === 'dono' ? html`<${Linha} href="#/ajustes/acesso" icone="user-plus" titulo="Pessoas com acesso" sub="Liberar o app e escolher o que cada pessoa vê" />` : ''}
             <${Linha} onClick=${() => confirmar('Sair da conta neste aparelho?') && app.sair?.()} icone="log-out" titulo="Sair" />
           </${Lista}>
         </${Secao}>`
       : ''}
 
-    ${app.locaisParaEnviar > 0
+    ${app.locaisParaEnviar > 0 && pode('ajustes')
       ? html`<${Secao} titulo="Dados de antes da nuvem">
           <div class="cartao">
             <p style="margin:0 0 12px">${plural(app.locaisParaEnviar, 'registro ficou salvo', 'registros ficaram salvos')} só neste aparelho, de quando o app ainda não estava na nuvem.</p>
@@ -93,7 +93,7 @@ export function Ajustes() {
         </${Secao}>`
       : ''}
 
-    <${Secao} titulo="Sítio">
+    ${pode('ajustes') ? html`<${Secao} titulo="Sítio">
       <div class="cartao formulario">
         <${Texto} rotulo="Nome do sítio" valor=${nome} onChange=${setNome} placeholder="Sítio São Francisco" />
         <${Texto} rotulo="Chave Pix" valor=${pix} onChange=${setPix} placeholder="Opcional, vai na mensagem de cobrança" />
@@ -118,7 +118,7 @@ export function Ajustes() {
         </div>
         <input ref=${arquivo} type="file" accept=".json,application/json" style="display:none" onChange=${restaurar} />
       </div>
-    </${Secao}>
+    </${Secao}>` : ''}
 
     ${!estaInstalado()
       ? html`<${Secao} titulo="Instalar no iPhone">
@@ -131,6 +131,17 @@ export function Ajustes() {
   </${Tela}>`;
 }
 
+// Texto curto com o que um membro pode usar.
+function resumoAreas(areas) {
+  if (!Array.isArray(areas)) return 'Acesso a tudo';
+  const nomes = AREAS.filter((a) => areas.includes(a.id)).map((a) => a.nome);
+  if (nomes.length === AREAS.length) return 'Acesso a tudo';
+  if (!nomes.length) return 'Só a tela inicial';
+  return 'Vê: ' + nomes.join(', ');
+}
+
+const linkPessoa = (email) => '/ajustes/acesso/' + encodeURIComponent(email);
+
 export function Acesso() {
   const [membros, setMembros] = useState(undefined);
   const [email, setEmail] = useState('');
@@ -140,27 +151,19 @@ export function Acesso() {
   const adicionar = async () => {
     const e = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return avisar('Digite um e-mail válido.', 'erro');
+    if (membros?.some((m) => m.email === e)) return ir(linkPessoa(e));
     try {
       await salvarMembro(app.nuvem, e);
       setEmail('');
-      avisar('Acesso liberado');
-    } catch (erro) {
-      avisar(mensagemErro(erro), 'erro');
-    }
-  };
-  const remover = async (m) => {
-    if (m.email === app.usuario?.email) return avisar('Você não pode tirar o seu próprio acesso.', 'erro');
-    if (!confirmar(`Tirar o acesso de ${m.email}?`)) return;
-    try {
-      await removerMembro(app.nuvem, m.email);
-      avisar('Acesso removido');
+      avisar('Acesso liberado. Escolha o que a pessoa pode usar.');
+      ir(linkPessoa(e));
     } catch (erro) {
       avisar(mensagemErro(erro), 'erro');
     }
   };
 
   return html`<${Tela} titulo="Pessoas com acesso" voltarPara="/ajustes" classe="formulario">
-    <p class="suave" style="margin:0">Digite o e-mail da pessoa. Depois ela abre o app, toca em “Criar conta” com esse mesmo e-mail e já consegue usar.</p>
+    <p class="suave" style="margin:0">Digite o e-mail da pessoa e escolha o que ela pode usar. Depois ela abre o app, toca em “Criar conta” com esse mesmo e-mail e já consegue entrar.</p>
     <${Texto} rotulo="E-mail" valor=${email} onChange=${setEmail} tipo="email" placeholder="nome@gmail.com" autocomplete="email" />
     <${Botao} icone="user-plus" onClick=${adicionar}>Liberar acesso</${Botao}>
     <${Secao} titulo="Quem pode usar">
@@ -169,8 +172,57 @@ export function Acesso() {
         : membros === null
           ? html`<p class="suave">Não consegui carregar a lista (sem internet?).</p>`
           : html`<${Lista}>
-              ${membros.map((m) => html`<${Linha} key=${m.email} titulo=${m.email} sub=${m.papel === 'dono' ? 'Responsável' : 'Toque para tirar o acesso'} onClick=${m.papel === 'dono' ? undefined : () => remover(m)} />`)}
+              ${membros.map((m) =>
+                m.papel === 'dono'
+                  ? html`<${Linha} key=${m.email} titulo=${m.email} sub="Responsável, vê tudo" />`
+                  : html`<${Linha} key=${m.email} titulo=${m.email} sub=${resumoAreas(m.areas)} href=${'#' + linkPessoa(m.email)} />`,
+              )}
             </${Lista}>`}
     </${Secao}>
+  </${Tela}>`;
+}
+
+// O que uma pessoa pode ver e usar no app.
+export function AcessoPessoa({ email }) {
+  const [membros, setMembros] = useState(undefined);
+  const [areas, setAreas] = useState(null);
+  useEffect(() => (app.nuvem ? ouvirMembros(app.nuvem, setMembros) : undefined), []);
+  const m = membros?.find((x) => x.email === email);
+  useEffect(() => {
+    if (m && areas === null) setAreas(Array.isArray(m.areas) ? m.areas : AREAS.map((a) => a.id));
+  }, [m]);
+
+  if (membros === undefined) return html`<${Tela} titulo="Acesso" voltarPara="/ajustes/acesso"><p class="suave">Carregando…</p></${Tela}>`;
+  if (!m || m.papel === 'dono')
+    return html`<${Tela} titulo="Acesso" voltarPara="/ajustes/acesso">
+      <${Vazio} icone="circle-alert" texto=${m ? 'O responsável vê tudo.' : 'Essa pessoa não está na lista.'} />
+    </${Tela}>`;
+
+  const marcadas = areas || [];
+  const trocarArea = (id, ligada) => setAreas(AREAS.map((a) => a.id).filter((x) => (x === id ? ligada : marcadas.includes(x))));
+  const todas = marcadas.length === AREAS.length;
+
+  const salvar = () => {
+    salvarAreas(app.nuvem, email, marcadas).catch((e) => avisar(mensagemErro(e), 'erro'));
+    avisar('Acesso atualizado');
+    trocar('/ajustes/acesso');
+  };
+  const remover = () => {
+    if (!confirmar(`Tirar o acesso de ${email}? A pessoa não vai mais conseguir entrar no app.`)) return;
+    removerMembro(app.nuvem, email).catch((e) => avisar(mensagemErro(e), 'erro'));
+    avisar('Acesso removido');
+    trocar('/ajustes/acesso');
+  };
+
+  return html`<${Tela} titulo="Acesso" voltarPara="/ajustes/acesso" classe="formulario" rodape=${html`<${Botao} icone="check" onClick=${salvar}>Salvar</${Botao}>`}>
+    <p style="margin:0"><strong>${email}</strong></p>
+    <p class="suave" style="margin:0">Escolha o que essa pessoa pode ver e usar. O que ficar desligado some do app dela.</p>
+    <div class="cartao interruptores">
+      ${AREAS.map((a) => html`<${Interruptor} key=${a.id} rotulo=${a.nome} dica=${a.dica} valor=${marcadas.includes(a.id)} onChange=${(v) => trocarArea(a.id, v)} />`)}
+    </div>
+    <div class="botoes">
+      <${Botao} tipo="secundario" onClick=${() => setAreas(todas ? [] : AREAS.map((a) => a.id))}>${todas ? 'Desligar tudo' : 'Ligar tudo'}</${Botao}>
+    </div>
+    <${Botao} tipo="perigo" icone="trash-2" onClick=${remover}>Tirar o acesso</${Botao}>
   </${Tela}>`;
 }

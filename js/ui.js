@@ -2,6 +2,7 @@
 import { html, useState, useEffect, useRef } from './vendor/preact.js';
 import { ICONES } from './vendor/icones.js';
 import { centParaTexto, parseDinheiro, parseQtd, qtd as fmtQtd, contem, hoje } from './util.js';
+import { podeAbrir } from './estado.js';
 
 export function Icone({ nome, tam = 22, classe = '' }) {
   return html`<svg
@@ -116,7 +117,9 @@ export function Tela({ titulo, voltarPara, direita, children, rodape, classe = '
   `;
 }
 
+// Links para partes do app que a pessoa não pode usar somem (botões) ou deixam de ser clicáveis (linhas e números).
 export function BotaoTopo({ icone, rotulo, onClick, href }) {
+  if (href && !podeAbrir(href)) return html`<span class="topo-botao"></span>`;
   if (href) return html`<a class="topo-botao" href=${href} aria-label=${rotulo}><${Icone} nome=${icone} /></a>`;
   return html`<button class="topo-botao" onClick=${onClick} aria-label=${rotulo}><${Icone} nome=${icone} /></button>`;
 }
@@ -134,6 +137,7 @@ export function Cartao({ children, classe = '' }) {
 
 // Linha de lista. Com href vira um link.
 export function Linha({ titulo, sub, direita, direitaSub, href, onClick, icone, classe = '' }) {
+  if (!podeAbrir(href)) href = undefined;
   const corpo = html`
     ${icone ? html`<span class="linha-icone">${typeof icone === 'string' ? html`<${Icone} nome=${icone} />` : icone}</span>` : ''}
     <span class="linha-texto">
@@ -172,12 +176,14 @@ export function Vazio({ icone = 'sprout', texto, children }) {
 export function Botao({ children, onClick, tipo = 'primario', icone, href, desativado, classe = '', submit }) {
   const conteudo = html`${icone ? html`<${Icone} nome=${icone} tam=${20} />` : ''}<span>${children}</span>`;
   const cls = `botao botao-${tipo} ${classe}`;
+  if (href && !podeAbrir(href)) return null;
   if (href && /^https?:/.test(href)) return html`<a class=${cls} href=${href} target="_blank" rel="noopener">${conteudo}</a>`;
   if (href) return html`<a class=${cls} href=${href}>${conteudo}</a>`;
   return html`<button class=${cls} type=${submit ? 'submit' : 'button'} onClick=${onClick} disabled=${desativado}>${conteudo}</button>`;
 }
 
 export function Numero({ rotulo, valor, tipo = '', href, detalhe, classe = '' }) {
+  if (!podeAbrir(href)) href = undefined;
   const corpo = html`<span class="numero-rotulo">${rotulo}</span>
     <strong class=${'numero-valor ' + tipo}>${valor}</strong>
     ${detalhe ? html`<span class="numero-detalhe">${detalhe}</span>` : ''}`;

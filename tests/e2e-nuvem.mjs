@@ -142,6 +142,62 @@ await membro.page.goto(base + '#/ajustes');
 const temAcesso = await membro.page.locator('text=Pessoas com acesso').count();
 if (temAcesso) erros.push('membro vê "Pessoas com acesso"');
 
+passo('dono deixa o membro usar só Vendas');
+const abrirPessoa = async () => {
+  await dono.page.goto(base + '#/ajustes/acesso');
+  await dono.page.click('text=membro@teste.com');
+  await dono.esperar('Escolha o que essa pessoa pode ver');
+};
+const area = (dica) => dono.page.locator('.interruptor-linha', { hasText: dica });
+await abrirPessoa();
+await dono.page.click('text=Desligar tudo');
+await area('Registrar e ver as vendas').click();
+await dono.foto('areas');
+await dono.page.click('text=Salvar');
+await dono.esperar('Vê: Vendas');
+
+passo('membro vê só Vendas, sem precisar reabrir o app');
+const abas = () => membro.page.locator('.abas a').allInnerTexts();
+await membro.page.goto(base + '#/');
+await membro.page.waitForFunction(() => document.querySelectorAll('.abas a').length === 3, null, { timeout: 15000 });
+if ((await abas()).join('|') !== 'Início|Vendas|Mais') erros.push('abas do membro limitado: ' + (await abas()).join('|'));
+for (const t of ['A receber (fiado)', 'Resultado de', 'Produção']) if (await membro.page.locator(`text=${t}`).count()) erros.push(`membro limitado vê "${t}" no início`);
+await membro.foto('limitado-inicio');
+await membro.page.goto(base + '#/receber');
+await membro.esperar('Você não tem acesso');
+await membro.page.goto(base + '#/mais');
+await membro.esperar('Ajustes');
+for (const t of ['Relatórios', 'Estoque e produção', 'Fornecedores']) if (await membro.page.locator(`text=${t}`).count()) erros.push(`membro limitado vê "${t}" em Mais`);
+await membro.foto('limitado-mais');
+await membro.page.goto(base + '#/ajustes');
+await membro.esperar('Sua conta');
+if (await membro.page.locator('text=Cópia de segurança').count()) erros.push('membro limitado vê a cópia de segurança');
+await membro.page.goto(base + '#/vendas');
+await membro.esperar('Maria');
+await membro.page.click('text=Maria');
+await membro.esperar('Itens');
+if (await membro.page.locator('a:has-text("Maria")').count()) erros.push('membro limitado tem link para a ficha do cliente');
+
+passo('dono libera A receber e o membro vê na hora');
+await abrirPessoa();
+await area('Ver quem deve e receber pagamentos').click();
+await dono.page.click('text=Salvar');
+await dono.esperar('Vê: Vendas, A receber (fiado)');
+await membro.page.goto(base + '#/receber');
+await membro.esperar('Ninguém está devendo', 15000);
+
+passo('membro reabre o app e continua limitado');
+await membro.page.reload();
+await membro.esperar('Ninguém está devendo', 15000);
+if ((await abas()).join('|') !== 'Início|Vendas|A receber|Mais') erros.push('abas depois de reabrir: ' + (await abas()).join('|'));
+
+passo('dono tira o acesso e o membro sai na hora');
+await abrirPessoa();
+await dono.page.click('text=Tirar o acesso');
+await dono.esperar('Quem pode usar');
+await membro.esperar('Acesso ainda não liberado', 15000);
+await membro.foto('acesso-tirado');
+
 await navegador.close();
 if (erros.length) {
   console.error('ERROS:\n' + erros.join('\n'));

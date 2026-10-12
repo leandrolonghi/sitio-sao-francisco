@@ -6,7 +6,7 @@ import { dinheiro, hoje, addDias, dataAmigavel, linkMapa, linkWaze, plural } fro
 import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, avisar } from '../ui.js';
 import { ehIOS, pode, podeAbrir } from '../estado.js';
 import { nomeVenda, resumoItens } from './comum.js';
-import { mudarPedido } from './pedidos.js';
+import { mudarPedido, BotaoSaida } from './pedidos.js';
 import { enderecoCompleto } from '../loja-comum.js';
 
 // O endereço vem sempre do cadastro do cliente.
@@ -14,13 +14,13 @@ export const enderecoDaVenda = (v) => enderecoCompleto(banco.get('clientes', v.c
 export const referenciaDaVenda = (v) => banco.get('clientes', v.clienteId)?.referencia || '';
 
 export function marcarEntrega(v, feita) {
-  banco.salvar('vendas', { ...v, entrega: { ...v.entrega, feita, feitaEm: feita ? hoje() : null } });
+  banco.salvar('vendas', { ...v, entrega: { ...v.entrega, feita, feitaEm: feita ? hoje() : null, aCaminho: false } });
   mudarPedido(v.pedidoId, { status: feita ? 'entregue' : 'confirmado' });
   avisar(feita ? 'Entrega feita' : 'Entrega voltou para a lista');
 }
 
-export function BotoesMapa({ endereco }) {
-  return html`<${Botao} icone="map-pin" href=${linkMapa(endereco, ehIOS())}>Abrir no mapa</${Botao}>
+export function BotoesMapa({ endereco, secundario }) {
+  return html`<${Botao} tipo=${secundario ? 'secundario' : 'primario'} icone="map-pin" href=${linkMapa(endereco, ehIOS())}>Abrir no mapa</${Botao}>
     <${Botao} tipo="secundario" icone="navigation" href=${linkWaze(endereco)}>Waze</${Botao}>`;
 }
 
@@ -44,17 +44,25 @@ function CartaoEntrega({ v, h }) {
   const atrasada = quando < h;
   const saldo = saldoVenda(v);
   const venda = '#/vendas/' + v.id;
+  const cliente = banco.get('clientes', v.clienteId);
+  const pedido = v.pedidoId ? banco.get('pedidos', v.pedidoId) : null;
+  const aCaminho = !!v.entrega.aCaminho;
+  // "Saí para entregar" avisa o cliente no WhatsApp (precisa do telefone dele)
+  const telefone = cliente?.telefone || pedido?.telefone;
   return html`<div class="cartao entrega">
     <div class="entrega-topo">
       <strong>${nomeVenda(v)}</strong>
-      <${Etiqueta} tipo=${atrasada ? 'erro' : quando === h ? 'atencao' : 'info'}>${atrasada ? 'atrasada · ' : ''}${dataAmigavel(quando, h)}</${Etiqueta}>
+      ${aCaminho
+        ? html`<${Etiqueta} tipo="ok">a caminho</${Etiqueta}>`
+        : html`<${Etiqueta} tipo=${atrasada ? 'erro' : quando === h ? 'atencao' : 'info'}>${atrasada ? 'atrasada · ' : ''}${dataAmigavel(quando, h)}</${Etiqueta}>`}
     </div>
     <p class="suave">${resumoItens(v.itens)}</p>
     <p class="suave">${dinheiro(totalVenda(v))}${saldo > 0 ? html` · <span class="atencao">falta receber ${dinheiro(saldo)}</span>` : ' · paga'}</p>
     ${endereco ? html`<${EnderecoEntrega} v=${v} endereco=${endereco} />` : html`<${SemEndereco} venda=${v} />`}
     <div class="botoes">
-      ${endereco ? html`<${BotoesMapa} endereco=${endereco} />` : ''}
-      <${Botao} tipo=${endereco ? 'secundario' : 'primario'} icone="check" onClick=${() => marcarEntrega(v, true)}>Marcar como entregue</${Botao}>
+      ${telefone ? html`<${BotaoSaida} telefone=${telefone} nome=${cliente?.nome || pedido?.nome} pedido=${pedido} venda=${v} aCaminho=${aCaminho} />` : ''}
+      ${endereco ? html`<${BotoesMapa} endereco=${endereco} secundario=${telefone && !aCaminho} />` : ''}
+      <${Botao} tipo=${endereco || telefone ? 'secundario' : 'primario'} icone="check" onClick=${() => marcarEntrega(v, true)}>Marcar como entregue</${Botao}>
     </div>
     ${podeAbrir(venda) ? html`<a class="entrega-ver" href=${venda}>Ver a venda</a>` : ''}
   </div>`;

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { codigoPix, crc16, lerChavePix, descreverChave, chaveParaColar, cpfValido } from '../js/pix.js';
+import { codigoPix, crc16, lerChavePix, descreverChave, chaveParaColar } from '../js/pix.js';
+import { cpfValido } from '../js/util.js';
 import { separarPagamento, linhaPagamento, valorParaPix } from '../js/loja-comum.js';
 
 test('código Pix igual ao exemplo do manual do Banco Central', () => {
@@ -42,10 +43,14 @@ test('mostra e copia a chave do jeito que o cliente entende', () => {
 
 test('forma de pagamento vai na observação do pedido e volta separada', () => {
   const obs = [linhaPagamento('Pix'), 'entregar depois das 17h', 'Ponto de referência: portão azul'].join('\n');
-  assert.deepEqual(separarPagamento(obs), { forma: 'Pix', obs: 'entregar depois das 17h\nPonto de referência: portão azul' });
-  assert.deepEqual(separarPagamento('Pagamento: Dinheiro'), { forma: 'Dinheiro', obs: null });
-  assert.deepEqual(separarPagamento('sem forma'), { forma: null, obs: 'sem forma' });
-  assert.deepEqual(separarPagamento(null), { forma: null, obs: null });
+  assert.deepEqual(separarPagamento(obs), { forma: 'Pix', detalhe: null, obs: 'entregar depois das 17h\nPonto de referência: portão azul' });
+  assert.deepEqual(separarPagamento('Pagamento: Dinheiro'), { forma: 'Dinheiro', detalhe: null, obs: null });
+  assert.deepEqual(separarPagamento('sem forma'), { forma: null, detalhe: null, obs: 'sem forma' });
+  assert.deepEqual(separarPagamento(null), { forma: null, detalhe: null, obs: null });
+  // troco do pagamento em dinheiro vai junto da forma
+  const comTroco = [linhaPagamento('Dinheiro', 'troco para R$ 100,00'), 'tocar a campainha'].join('\n');
+  assert.equal(comTroco.split('\n')[0], 'Pagamento: Dinheiro · troco para R$ 100,00');
+  assert.deepEqual(separarPagamento(comTroco), { forma: 'Dinheiro', detalhe: 'troco para R$ 100,00', obs: 'tocar a campainha' });
   assert.equal(valorParaPix({ totalCent: 3700, itens: [{ precoCent: 1600 }, { precoCent: 500 }] }), 3700);
   assert.equal(valorParaPix({ totalCent: 1600, itens: [{ precoCent: 1600 }, { precoCent: null }] }), null, 'item a combinar: cliente digita o valor');
 });

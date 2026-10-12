@@ -1,4 +1,4 @@
-// Página de pedidos dos clientes (pedido/index.html). O cliente faz um cadastro (nome, telefone,
+// Página de pedidos dos clientes (pedido/index.html). O cliente faz um cadastro (nome, telefone, CPF opcional,
 // endereço e uma senha de 4 números) e depois entra com telefone e senha: o endereço já vem preenchido.
 // Os pedidos chegam no app do sítio, na tela Pedidos.
 import { html, render, useState, useEffect } from './vendor/preact.js';
@@ -6,13 +6,17 @@ import { firebaseConfig } from '../config.js';
 import { conectar } from './firestore-rest.js';
 import { criarConta } from './loja-conta.js';
 import {
-  Tela, Secao, Botao, Texto, AreaTexto, CampoData, Segmentado, EntradaQtd, Etiqueta, Icone, Vazio, Avisos, CamposEndereco, CartaoEndereco, Folha,
-  avisar, useRota, trocar, confirmar,
+  Tela, Secao, Botao, Texto, AreaTexto, CampoData, CampoDinheiro, Segmentado, EntradaQtd, Etiqueta, Icone, Vazio, Avisos, CamposEndereco, CartaoEndereco,
+  Folha, avisar, useRota, trocar, confirmar,
 } from './ui.js';
-import { dinheiro, qtd, hoje, dataAmigavel, dataBR, formatarTelefone, novoId, linkWhatsApp, arred3, plural } from './util.js';
 import {
-  INFO_LOJA, STATUS_PEDIDO, FORMAS_NA_PAGINA, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco, textoOuNulo,
-  linhaPagamento, separarPagamento, valorParaPix,
+  dinheiro, qtd, hoje, addDias, paraData, dataAmigavel, dataBR, dataCurta, formatarTelefone, novoId, linkWhatsApp, arred3, plural, soDigitos, cpfValido,
+  formatarCpf, ehIOS,
+} from './util.js';
+import {
+  INFO_LOJA, STATUS_PEDIDO, FORMAS_NA_PAGINA, CIDADE_ATENDIDA, DIAS_DA_SEMANA, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco,
+  textoOuNulo, linhaPagamento, separarPagamento, valorParaPix, nomeDoPedido, taxaDaEntrega, freteGratisAPartir, diasDeEntrega, textoDiasDeEntrega,
+  proximasEntregas, linkDaRetirada,
 } from './loja-comum.js';
 import { codigoPix, descreverChave, chaveParaColar } from './pix.js';
 import { VERSAO } from './versao.js';
@@ -175,15 +179,25 @@ async function salvarCadastro(dados) {
   const doc = {
     telefone: loja.sessao.telefone,
     nome: textoOuNulo(dados.nome),
+    cpf: soDigitos(dados.cpf) || null,
     endereco: textoOuNulo(dados.endereco),
+    numero: textoOuNulo(dados.numero),
     bairro: textoOuNulo(dados.bairro),
-    cidade: textoOuNulo(dados.cidade),
+    cidade: CIDADE_ATENDIDA, // por enquanto o sítio só entrega nesta cidade
     referencia: textoOuNulo(dados.referencia),
     criadoEm: loja.cliente?.criadoEm || agora,
     // sempre depois da última mudança (que pode ter sido do sítio, no app), para o app saber que é nova
     atualizadoEm: Math.max(agora, Math.min((loja.cliente?.atualizadoEm || 0) + 1, agora + 30 * 60000)),
   };
-  await loja.db.gravar('cadastros/' + doc.telefone, doc);
+  try {
+    await loja.db.gravar('cadastros/' + doc.telefone, doc);
+  } catch (e) {
+    if (e.code !== 'permission-denied') throw e;
+    // regras do banco ainda sem número e CPF (o sítio publica no Firebase): grava como antes, com o número
+    // junto da rua, para o cadastro não parar até lá
+    const { numero, cpf, ...antes } = doc;
+    await loja.db.gravar('cadastros/' + doc.telefone, { ...antes, endereco: [doc.endereco, numero].filter(Boolean).join(', ') || null });
+  }
   mudar({ cliente: doc });
 }
 
@@ -259,14 +273,27 @@ function CampoSenha({ valor, onChange, erro, nova }) {
   />`;
 }
 
+// Rua, número e bairro são obrigatórios; a cidade é fixa e o ponto de referência, opcional.
+function errosDoEndereco(d) {
+  const er = {};
+  if (!(d.endereco || '').trim()) er.endereco = 'Digite a rua.';
+  if (!(d.numero || '').trim()) er.numero = 'Digite o número (ou s/n).';
+  if (!(d.bairro || '').trim()) er.bairro = 'Digite o bairro.';
+  return er;
+}
+
 function errosDoCadastro(d) {
   const er = {};
   if ((d.nome || '').trim().length < 2) er.nome = 'Digite seu nome.';
-  if (!(d.endereco || '').trim()) er.endereco = 'Digite a rua e o número.';
-  if (!(d.bairro || '').trim()) er.bairro = 'Digite o bairro.';
-  if (!(d.cidade || '').trim()) er.cidade = 'Digite a cidade.';
-  return er;
+  if ((d.cpf || '').trim() && !cpfValido(d.cpf)) er.cpf = 'CPF inválido. Confira os números.';
+  return { ...er, ...errosDoEndereco(d) };
 }
+
+function CampoCpf({ valor, onChange, erro }) {
+  return html`<${Texto} rotulo="CPF (opcional)" valor=${valor} onChange=${onChange} modo="numeric" placeholder="000.000.000-00" erro=${erro} />`;
+}
+
+const CADASTRO_VAZIO = { nome: '', cpf: '', endereco: '', numero: '', bairro: '', cidade: CIDADE_ATENDIDA, referencia: '' };
 
 function useFormulario(inicial) {
   const [dados, setDados] = useState(inicial);
@@ -288,7 +315,7 @@ let rascunho = {};
 function Entrar() {
   useLoja();
   const [modo, setModo] = useState('entrar'); // entrar | cadastro | esqueci
-  const { dados, erros, setErros, mudarCampo } = useFormulario({ telefone: '', pin: '', nome: '', endereco: '', bairro: '', cidade: '', referencia: '' });
+  const { dados, erros, setErros, mudarCampo } = useFormulario({ telefone: '', pin: '', ...CADASTRO_VAZIO });
   const [erro, setErro] = useState('');
   const [enviando, setEnviando] = useState(false);
   const trocarModo = (m) => {
@@ -377,7 +404,10 @@ function Entrar() {
     <form class="formulario" onSubmit=${ehCadastro ? cadastrar : entrar}>
       ${ehCadastro ? html`<${Texto} rotulo="Seu nome" valor=${dados.nome} onChange=${mudarCampo('nome')} erro=${erros.nome} autocomplete="name" />` : ''}
       <${CampoTelefone} valor=${dados.telefone} onChange=${mudarCampo('telefone')} erro=${erros.telefone} />
-      ${ehCadastro ? html`<${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} />` : ''}
+      ${ehCadastro
+        ? html`<${CampoCpf} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />
+            <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} />`
+        : ''}
       <${CampoSenha} valor=${dados.pin} onChange=${mudarCampo('pin')} erro=${erros.pin} nova=${ehCadastro} />
       ${erro ? html`<div class="faixa erro" role="alert" style="margin:0"><${Icone} nome="circle-alert" /><div class="faixa-corpo"><p>${erro}</p></div></div>` : ''}
       <${Botao} submit desativado=${enviando}>${enviando ? 'Aguarde…' : ehCadastro ? 'Fazer cadastro' : 'Entrar'}</${Botao}>
@@ -395,7 +425,7 @@ function Entrar() {
 // Entrou, mas o cadastro não chegou a ser gravado (ex.: caiu a internet no meio).
 function CompletarCadastro() {
   const { sessao } = useLoja();
-  const { dados, erros, setErros, mudarCampo } = useFormulario({ nome: '', endereco: '', bairro: '', cidade: '', referencia: '', ...rascunho });
+  const { dados, erros, setErros, mudarCampo } = useFormulario({ ...CADASTRO_VAZIO, ...rascunho });
   const [enviando, setEnviando] = useState(false);
   const salvar = async (e) => {
     e.preventDefault();
@@ -417,7 +447,8 @@ function CompletarCadastro() {
     <form class="formulario" onSubmit=${salvar}>
       <p class="suave" style="margin:0">Telefone: <strong>${formatarTelefone(sessao.telefone)}</strong></p>
       <${Texto} rotulo="Seu nome" valor=${dados.nome} onChange=${mudarCampo('nome')} erro=${erros.nome} autocomplete="name" />
-      <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} />
+      <${CampoCpf} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />
+      <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} />
       <${Botao} submit desativado=${enviando}>${enviando ? 'Salvando…' : 'Salvar cadastro'}</${Botao}>
     </form>
     <div class="entrada-links"><button class="link" onClick=${() => sairDaConta()}>Sair</button></div>
@@ -474,18 +505,48 @@ function VerProduto({ p, foto, fechada, onFechar }) {
   </${Folha}>`;
 }
 
+// Dias da semana em que o sítio entrega, se não for todo dia ("às quartas e aos sábados").
+const diasRestritos = (info) => {
+  const dias = diasDeEntrega(info);
+  return dias.length && dias.length < 7 ? dias : null;
+};
+
+// Faixa da tela inicial: frete grátis (promoção ou a partir de um valor), valor e dias da entrega.
+function AvisoEntrega({ info }) {
+  const dias = diasRestritos(info);
+  const quando = dias ? html`<p>Entregamos ${textoDiasDeEntrega(dias)}.</p>` : '';
+  const aPartir = freteGratisAPartir(info);
+  if (info.freteGratis) {
+    return html`<div class="faixa ok"><${Icone} nome="gift" /><div class="faixa-corpo">
+      <p><strong>Frete grátis!</strong> Na promoção do sítio, a entrega não é cobrada.</p>${quando}
+    </div></div>`;
+  }
+  if (aPartir) {
+    return html`<div class="faixa ok"><${Icone} nome="gift" /><div class="faixa-corpo">
+      <p><strong>Frete grátis</strong> em pedidos a partir de <strong>${dinheiro(aPartir)}</strong>.</p>
+      <p>Abaixo disso, a entrega é ${dinheiro(info.taxaEntregaCent)}. Retirando no local, não paga entrega.</p>${quando}
+    </div></div>`;
+  }
+  if (!(info.taxaEntregaCent > 0) && !dias) return '';
+  return html`<div class="faixa"><${Icone} nome="truck" /><div class="faixa-corpo">
+    ${info.taxaEntregaCent > 0 ? html`<p>Entrega: <strong>${dinheiro(info.taxaEntregaCent)}</strong>. Retirando no local, não paga entrega.</p>` : ''}${quando}
+  </div></div>`;
+}
+
 function Catalogo() {
   const { produtos, cliente, info, erro, fotos } = useLoja();
   const itens = itensDoCarrinho();
   const total = totalItens(itens);
   const fechada = info.aberta === false;
   const [vendo, setVendo] = useState(null);
+  const aPartir = freteGratisAPartir(info);
 
   return html`<${Tela}
     titulo="Fazer pedido"
     rodape=${itens.length && !fechada
       ? html`<div>
           <div class="rodape-total"><span>${plural(itens.length, 'item', 'itens')}</span><strong>${dinheiro(total)}</strong></div>
+          ${aPartir ? html`<p class="rodape-frete">${total >= aPartir ? 'Entrega grátis neste pedido!' : `Faltam ${dinheiro(aPartir - total)} para a entrega sair grátis.`}</p>` : ''}
           <${Botao} icone="chevron-right" href="#/finalizar">Continuar</${Botao}>
         </div>`
       : null}
@@ -499,11 +560,7 @@ function Catalogo() {
     </div>
     ${erro ? html`<div class="faixa erro"><${Icone} nome="circle-alert" /><div class="faixa-corpo"><p>${erro}</p><p><button class="link" onClick=${carregarCatalogo}>Tentar de novo</button></p></div></div>` : ''}
     ${fechada ? html`<${AvisoFechada} />` : ''}
-    ${!fechada && info.taxaEntregaCent > 0
-      ? html`<div class="faixa"><${Icone} nome="truck" /><div class="faixa-corpo">
-          <p>Entrega: <strong>${dinheiro(info.taxaEntregaCent)}</strong>. Retirando no sítio, não paga entrega.</p>
-        </div></div>`
-      : ''}
+    ${fechada ? '' : html`<${AvisoEntrega} info=${info} />`}
     ${produtos === null
       ? html`<p class="suave centro">Carregando os produtos…</p>`
       : !produtos.length && !erro
@@ -532,15 +589,52 @@ function Catalogo() {
   </${Tela}>`;
 }
 
+// "Hoje", "Amanhã" ou o dia da semana.
+function nomeDoDia(d) {
+  if (d === hoje()) return 'Hoje';
+  if (d === addDias(hoje(), 1)) return 'Amanhã';
+  return DIAS_DA_SEMANA[paraData(d).getDay()];
+}
+
+// Datas em que o sítio entrega (os dias marcados no app); os outros dias não aparecem.
+function DatasDeEntrega({ dias, valor, onChange }) {
+  const datas = proximasEntregas(dias, hoje());
+  return html`<div class="campo">
+    <span class="campo-rotulo">Quando entregar?</span>
+    <div class="datas-entrega" role="radiogroup">
+      ${datas.map(
+        (d) => html`<button type="button" role="radio" aria-checked=${valor === d} class=${valor === d ? 'ativo' : ''} onClick=${() => onChange(d)}>
+          <span>${nomeDoDia(d)}</span><strong>${dataCurta(d)}</strong>
+        </button>`,
+      )}
+    </div>
+    <span class="campo-dica">O sítio entrega ${textoDiasDeEntrega(dias)}.</span>
+  </div>`;
+}
+
+// Onde retirar: o endereço que o sítio pôs no app e o botão do mapa.
+function CartaoRetirada({ info }) {
+  const mapa = linkDaRetirada(info, ehIOS());
+  if (!mapa) return html`<p class="campo-dica" style="margin:0">O sítio combina com você onde retirar.</p>`;
+  return html`<div class="cartao cartao-endereco">
+    <span class="campo-rotulo">Retirar em</span>
+    <p class="entrega-endereco"><${Icone} nome="map-pin" tam=${18} /><span>${info.retiradaEndereco || 'Local marcado no mapa'}</span></p>
+    <${Botao} tipo="secundario" icone="navigation" href=${mapa}>Ver no mapa</${Botao}>
+  </div>`;
+}
+
 function Finalizar() {
   const { cliente, info } = useLoja();
   const itens = itensDoCarrinho();
   const [entrega, setEntrega] = useState('entregar');
-  const end = useFormulario(camposEndereco(cliente));
-  const [mudandoEndereco, setMudandoEndereco] = useState(!enderecoCompleto(cliente));
+  const end = useFormulario({ ...camposEndereco(cliente), cidade: CIDADE_ATENDIDA });
+  // cadastro antigo sem o número (ou sem bairro): já abre os campos para completar
+  const [mudandoEndereco, setMudandoEndereco] = useState(() => Object.keys(errosDoEndereco(camposEndereco(cliente))).length > 0);
   const [data, setData] = useState('');
+  const [dataEntrega, setDataEntrega] = useState('');
   const [obs, setObs] = useState('');
   const [forma, setForma] = useState('');
+  const [troco, setTroco] = useState(null);
   const [enviando, setEnviando] = useState(false);
   const [erros, setErros] = useState({});
   // carrinho vazio (ex.: abriu este endereço direto): volta para os produtos
@@ -550,36 +644,49 @@ function Finalizar() {
   if (!itens.length) return null;
   const semPreco = itens.some((i) => i.precoCent == null);
   const entregar = entrega === 'entregar';
-  // valor da entrega que o sítio cobra (nos ajustes da página, no app)
-  const taxa = entregar && info.taxaEntregaCent > 0 ? info.taxaEntregaCent : 0;
-  const total = totalItens(itens) + taxa;
+  const subtotal = totalItens(itens);
+  // valor da entrega (nos ajustes do app): grátis na promoção ou a partir do valor do frete grátis
+  const taxaSeEntregar = taxaDaEntrega(info, subtotal);
+  const taxa = entregar ? taxaSeEntregar : 0;
+  const total = subtotal + taxa;
+  const aPartir = freteGratisAPartir(info);
+  const entregaGratis = entregar && !taxa && (info.taxaEntregaCent > 0 || info.freteGratis);
+  // dias de entrega marcados no app: o cliente escolhe uma dessas datas (a primeira já vem marcada)
+  const dias = entregar ? diasRestritos(info) : null;
+  const datas = dias ? proximasEntregas(dias, hoje()) : [];
+  const quando = dias ? (datas.includes(dataEntrega) ? dataEntrega : datas[0] || '') : data;
 
   const enviar = async () => {
     const er = {};
-    if (entregar && !end.dados.endereco.trim()) {
-      er.endereco = 'Coloque o endereço para a entrega.';
-      end.setErros({ endereco: 'Digite a rua e o número.' });
-      setMudandoEndereco(true);
+    if (entregar) {
+      const erEnd = errosDoEndereco(end.dados);
+      if (Object.keys(erEnd).length) {
+        er.endereco = 'Complete o endereço para a entrega.';
+        end.setErros(erEnd);
+        setMudandoEndereco(true);
+      }
     }
-    if (data && data < hoje()) er.data = 'Escolha hoje ou um dia que ainda vai chegar.';
+    if (!dias && data && data < hoje()) er.data = 'Escolha hoje ou um dia que ainda vai chegar.';
     if (!forma) er.pagamento = 'Escolha como vai pagar.';
+    if (forma === 'Dinheiro' && troco > 0 && !semPreco && troco <= total) er.troco = `Coloque um valor maior que o total (${dinheiro(total)}), ou deixe em branco.`;
     setErros(er);
     if (Object.keys(er).length) return avisar(Object.values(er)[0], 'erro');
     if (info.aberta === false) return avisar('O sítio não está recebendo pedidos agora.', 'erro');
     const id = novoId();
     const agora = Date.now();
     const referencia = entregar && end.dados.referencia.trim() ? 'Ponto de referência: ' + end.dados.referencia.trim() : '';
+    const detalhe = forma === 'Dinheiro' && troco > 0 ? 'troco para ' + dinheiro(troco) : '';
     const pedido = {
       id,
       nome: cliente.nome,
       telefone: cliente.telefone,
       entrega,
       endereco: entregar ? enderecoCompleto(end.dados) : null,
-      dataDesejada: data || null,
+      dataDesejada: quando || null,
       itens,
       entregaCent: taxa || undefined,
       totalCent: total,
-      obs: [linhaPagamento(forma), obs.trim(), referencia].filter(Boolean).join('\n'),
+      obs: [linhaPagamento(forma, detalhe), obs.trim(), referencia].filter(Boolean).join('\n'),
       status: 'novo',
       criadoEm: agora,
       atualizadoEm: agora,
@@ -610,27 +717,41 @@ function Finalizar() {
       <ul class="itens-pedido" style="margin-top:0">
         ${itens.map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade} ${i.nome}</span><span>${i.precoCent != null ? dinheiro(Math.round(i.qtd * i.precoCent)) : 'a combinar'}</span></li>`)}
         ${taxa ? html`<li><span>Entrega</span><span>${dinheiro(taxa)}</span></li>` : ''}
+        ${entregaGratis ? html`<li><span>Entrega</span><strong class="positivo">Grátis</strong></li>` : ''}
         <li><strong>Total${semPreco ? ' (sem os itens a combinar)' : ''}</strong><strong>${dinheiro(total)}</strong></li>
       </ul>
+      ${entregar && aPartir && subtotal < aPartir ? html`<p class="campo-dica"><strong>Faltam ${dinheiro(aPartir - subtotal)}</strong> para a entrega sair grátis.</p>` : ''}
       <p class="campo-dica">O sítio confirma o valor final.</p>
     </div>
     <${Segmentado}
       rotulo="Como quer receber?"
       valor=${entrega}
       onChange=${setEntrega}
-      opcoes=${[['entregar', info.taxaEntregaCent > 0 ? `Entregar (${dinheiro(info.taxaEntregaCent)})` : 'Entregar'], ['retirar', 'Retirar no sítio']]}
+      opcoes=${[['entregar', taxaSeEntregar ? `Entregar (${dinheiro(taxaSeEntregar)})` : info.taxaEntregaCent > 0 || info.freteGratis ? 'Entregar (grátis)' : 'Entregar'], ['retirar', 'Retirar no local']]}
     />
+    ${!entregar ? html`<${CartaoRetirada} info=${info} />` : ''}
     ${entregar && !mudandoEndereco
       ? html`<${CartaoEndereco} rotulo="Entregar em" texto=${enderecoCompleto(end.dados)} referencia=${end.dados.referencia} onMudar=${() => setMudandoEndereco(true)} />`
       : ''}
     ${entregar && mudandoEndereco
-      ? html`<${CamposEndereco} dados=${end.dados} mudarCampo=${end.mudarCampo} erros=${end.erros} />
+      ? html`<${CamposEndereco} dados=${end.dados} mudarCampo=${end.mudarCampo} erros=${end.erros} cidadeFixa=${CIDADE_ATENDIDA} />
           <p class="campo-dica" style="margin:0">Este endereço fica salvo no seu cadastro.</p>`
       : ''}
+    ${dias
+      ? html`<${DatasDeEntrega} dias=${dias} valor=${quando} onChange=${setDataEntrega} />`
+      : html`<${CampoData} rotulo="Para quando?" valor=${data} onChange=${setData} dica="Deixe em branco para o quanto antes" erro=${erros.data} opcional />`}
     <${Segmentado} rotulo="Como vai pagar?" valor=${forma} onChange=${setForma} opcoes=${FORMAS_NA_PAGINA.map((f) => [f, f])} />
     ${erros.pagamento && !forma ? html`<p class="campo-dica erro" style="margin:-8px 0 0">${erros.pagamento}</p>` : ''}
     ${forma === 'Pix' ? html`<${PagarComPix} valorCent=${semPreco ? null : total} />` : ''}
-    <${CampoData} rotulo="Para quando?" valor=${data} onChange=${setData} dica="Deixe em branco para o quanto antes" erro=${erros.data} opcional />
+    ${forma === 'Dinheiro'
+      ? html`<${CampoDinheiro}
+          rotulo="Troco para quanto?"
+          valor=${troco}
+          onChange=${(v) => (setTroco(v), setErros((e) => ({ ...e, troco: null })))}
+          erro=${erros.troco}
+          dica="Deixe em branco se não precisa de troco."
+        />`
+      : ''}
     <${AreaTexto} rotulo="Observação" valor=${obs} onChange=${setObs} placeholder="Opcional. Ex.: ovos grandes, entregar depois das 17h" />
     <p class="suave pequeno" style="margin:0">Pedido em nome de <strong>${cliente.nome}</strong>, ${formatarTelefone(cliente.telefone)}.</p>
   </${Tela}>`;
@@ -696,10 +817,10 @@ function PagarComPix({ valorCent, compacto }) {
 function textoParaOSitio(p) {
   const linhas = [`Olá! Fiz um pedido pela página (${p.nome}):`];
   for (const i of p.itens) linhas.push(`• ${qtd(i.qtd)} ${i.unidade} ${i.nome}`);
-  linhas.push(p.entrega === 'entregar' ? `Entregar em: ${p.endereco}` : 'Vou retirar no sítio.');
+  linhas.push(p.entrega === 'entregar' ? `Entregar em: ${p.endereco}` : 'Vou retirar no local.');
   if (p.dataDesejada) linhas.push(`Para: ${dataBR(p.dataDesejada)}`);
-  const forma = separarPagamento(p.obs).forma;
-  if (forma) linhas.push(`Pagamento: ${forma}`);
+  const { forma, detalhe } = separarPagamento(p.obs);
+  if (forma) linhas.push(`Pagamento: ${forma}${detalhe ? ` (${detalhe})` : ''}`);
   return linhas.join('\n');
 }
 
@@ -713,6 +834,7 @@ function Enviado({ id }) {
   return html`<${Tela} titulo="Pedido enviado">
     <${Vazio} icone="circle-check" texto="Pedido enviado! O sítio vai confirmar e você acompanha em “Meus pedidos”.">
       ${pix ? html`<div style="width:100%;text-align:left"><${PagarComPix} valorCent=${valorParaPix(pedido)} /></div>` : ''}
+      ${pedido?.entrega === 'retirar' ? html`<div class="vazio-cartao"><${CartaoRetirada} info=${info} /></div>` : ''}
       <div class="botoes" style="width:100%">
         ${info.whatsapp && pedido ? html`<${Botao} icone="message-circle" href=${linkWhatsApp(info.whatsapp, textoParaOSitio(pedido))}>Avisar o sítio no WhatsApp</${Botao}>` : ''}
         <${Botao} tipo="secundario" href="#/meus">Ver meus pedidos</${Botao}>
@@ -729,10 +851,50 @@ async function cancelarPedido(p) {
   if (loja.sessao?.telefone === novo.telefone) mudar({ meus: { telefone: novo.telefone, lista: lista.map((x) => (x.id === novo.id ? novo : x)) } });
 }
 
+const resumoDosItens = (p) => (p.itens || []).map((i) => `${qtd(i.qtd)} ${i.unidade || ''} ${i.nome}`.replace(/\s+/g, ' ')).join(', ');
+
+// Pedido em "Meus pedidos": número, data, valor e situação; tocando, abre os itens e o resto.
+function ResumoPedido({ p, aberto, onAbrir, children }) {
+  const s = STATUS_PEDIDO[p.status] || STATUS_PEDIDO.novo;
+  const dia = new Date(p.criadoEm).toLocaleDateString('sv-SE');
+  const { forma, detalhe } = separarPagamento(p.obs);
+  const mapa = linkDaRetirada(loja.info, ehIOS());
+  return html`<div class=${'cartao pedido pedido-resumo' + (aberto ? ' aberto' : '')}>
+    <button type="button" class="pedido-cabeca" aria-expanded=${aberto} onClick=${onAbrir}>
+      <span class="pedido-cabeca-texto">
+        <span class="pedido-cabeca-linha">
+          <strong>${nomeDoPedido(p)}</strong>
+          <${Etiqueta} tipo=${s.tipo}>${p.status === 'entregue' && p.entrega === 'retirar' ? 'Retirado' : s.nome}</${Etiqueta}>
+        </span>
+        <span class="suave">${[dataAmigavel(dia), p.totalCent ? dinheiro(p.totalCent) : ''].filter(Boolean).join(' · ')}</span>
+        ${aberto ? '' : html`<span class="suave pedido-itens-curto">${resumoDosItens(p)}</span>`}
+      </span>
+      <${Icone} nome="chevron-down" tam=${20} classe="pedido-seta" />
+    </button>
+    ${aberto
+      ? html`<div class="pedido-detalhes">
+          <ul class="itens-pedido">
+            ${(p.itens || []).map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade} ${i.nome}</span>${i.precoCent != null ? html`<span>${dinheiro(Math.round(i.qtd * i.precoCent))}</span>` : ''}</li>`)}
+            ${p.entregaCent ? html`<li><span>Entrega</span><span>${dinheiro(p.entregaCent)}</span></li>` : ''}
+            ${p.totalCent ? html`<li><strong>${p.status === 'novo' ? 'Total estimado' : 'Total'}</strong><strong>${dinheiro(p.totalCent)}</strong></li>` : ''}
+          </ul>
+          <p class="suave">${p.entrega === 'entregar' ? 'Entregar' : 'Retirar no local'}${p.dataDesejada ? ' · para ' + dataBR(p.dataDesejada) : ''}</p>
+          ${p.entrega === 'retirar' && mapa && ['novo', 'confirmado'].includes(p.status)
+            ? html`<p>${loja.info.retiradaEndereco || ''} <a href=${mapa} target="_blank" rel="noopener">Ver no mapa</a></p>`
+            : ''}
+          ${forma ? html`<p class="suave">Pagamento: ${forma}${detalhe ? ` (${detalhe})` : ''}</p>` : ''}
+          <p>${s.texto}</p>
+          ${children}
+        </div>`
+      : ''}
+  </div>`;
+}
+
 function MeusPedidos() {
   const { atualizandoMeus, erroMeus } = useLoja();
   const pedidos = meusPedidos();
   const [cancelando, setCancelando] = useState(null);
+  const [aberto, setAberto] = useState(null);
   useEffect(() => {
     carregarMeus();
   }, []);
@@ -762,31 +924,16 @@ function MeusPedidos() {
         ? html`<${Vazio} icone="shopping-cart" texto=${atualizandoMeus ? 'Carregando…' : 'Você ainda não fez pedidos.'}>
             ${atualizandoMeus ? '' : html`<${Botao} href="#/" icone="plus">Fazer pedido</${Botao}>`}
           </${Vazio}>`
-        : html`${pedidos.map((p) => {
-              const s = STATUS_PEDIDO[p.status] || STATUS_PEDIDO.novo;
-              const dia = new Date(p.criadoEm).toLocaleDateString('sv-SE');
-              return html`<div class="cartao pedido" key=${p.id}>
-                <div class="entrega-topo">
-                  <strong>Pedido de ${dataAmigavel(dia)}</strong>
-                  <${Etiqueta} tipo=${s.tipo}>${p.status === 'entregue' && p.entrega === 'retirar' ? 'Retirado' : s.nome}</${Etiqueta}>
-                </div>
-                <ul class="itens-pedido">
-                  ${(p.itens || []).map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade} ${i.nome}</span></li>`)}
-                  ${p.entregaCent ? html`<li><span>Entrega</span><span>${dinheiro(p.entregaCent)}</span></li>` : ''}
-                </ul>
-                ${p.totalCent ? html`<p><strong>${p.status === 'novo' ? 'Total estimado' : 'Total'}: ${dinheiro(p.totalCent)}</strong></p>` : ''}
-                <p class="suave">${p.entrega === 'entregar' ? 'Entregar' : 'Retirar no sítio'}${p.dataDesejada ? ' · para ' + dataBR(p.dataDesejada) : ''}</p>
-                <p class="suave">${s.texto}</p>
-                ${['novo', 'confirmado'].includes(p.status) && separarPagamento(p.obs).forma === 'Pix'
-                  ? html`<div style="margin-top:12px"><${PagarComPix} valorCent=${valorParaPix(p)} compacto /></div>`
-                  : ''}
-                ${p.status === 'novo'
-                  ? html`<div class="botoes" style="margin-top:12px">
-                      <${Botao} tipo="secundario" icone="ban" onClick=${() => cancelar(p)} desativado=${cancelando === p.id}>${cancelando === p.id ? 'Cancelando…' : 'Cancelar pedido'}</${Botao}>
-                    </div>`
-                  : ''}
-              </div>`;
-            })}
+        : html`${pedidos.map((p) => html`<${ResumoPedido} key=${p.id} p=${p} aberto=${aberto === p.id} onAbrir=${() => setAberto(aberto === p.id ? null : p.id)}>
+              ${['novo', 'confirmado', 'em_rota'].includes(p.status) && separarPagamento(p.obs).forma === 'Pix'
+                ? html`<div style="margin-top:12px"><${PagarComPix} valorCent=${valorParaPix(p)} compacto /></div>`
+                : ''}
+              ${p.status === 'novo'
+                ? html`<div class="botoes" style="margin-top:12px">
+                    <${Botao} tipo="secundario" icone="ban" onClick=${() => cancelar(p)} desativado=${cancelando === p.id}>${cancelando === p.id ? 'Cancelando…' : 'Cancelar pedido'}</${Botao}>
+                  </div>`
+                : ''}
+            </${ResumoPedido}>`)}
             <div class="botoes" style="margin-top:14px">
               <${Botao} tipo="secundario" icone="refresh-cw" onClick=${carregarMeus} desativado=${atualizandoMeus}>${atualizandoMeus ? 'Atualizando…' : 'Atualizar'}</${Botao}>
             </div>`}
@@ -795,7 +942,7 @@ function MeusPedidos() {
 
 function MeuCadastro() {
   const { cliente } = useLoja();
-  const { dados, erros, setErros, mudarCampo } = useFormulario({ nome: cliente.nome || '', ...camposEndereco(cliente) });
+  const { dados, erros, setErros, mudarCampo } = useFormulario({ nome: cliente.nome || '', cpf: formatarCpf(cliente.cpf), ...camposEndereco(cliente), cidade: CIDADE_ATENDIDA });
   const [enviando, setEnviando] = useState(false);
   const salvar = async (e) => {
     e.preventDefault();
@@ -819,7 +966,8 @@ function MeuCadastro() {
     <form class="formulario" onSubmit=${salvar}>
       <p class="suave" style="margin:0">Telefone: <strong>${formatarTelefone(cliente.telefone)}</strong></p>
       <${Texto} rotulo="Seu nome" valor=${dados.nome} onChange=${mudarCampo('nome')} erro=${erros.nome} autocomplete="name" />
-      <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} />
+      <${CampoCpf} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />
+      <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} />
       <${Botao} submit icone="check" desativado=${enviando}>${enviando ? 'Salvando…' : 'Salvar'}</${Botao}>
     </form>
     <div class="botoes" style="margin-top:22px">

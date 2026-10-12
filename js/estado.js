@@ -56,6 +56,8 @@ export function podeAbrir(href, quem = app) {
   if (!href || !href.startsWith('#/')) return true;
   const [a, b, c] = href.slice(2).split('?')[0].split('/');
   if (a === 'ajustes' && b === 'acesso') return quem.modo !== 'nuvem' || quem.papel === 'dono';
+  // entrega e retirada abre pelos Ajustes e pelos Pedidos
+  if (a === 'pedidos' && b === 'entrega') return pode('pedidos', quem) || pode('ajustes', quem);
   // a ficha do cliente é onde se recebe o fiado
   if (a === 'clientes' && b && b !== 'novo' && !c && pode('receber', quem)) return true;
   return !AREA_DA_ROTA[a] || pode(AREA_DA_ROTA[a], quem);
@@ -65,6 +67,4 @@ export function estaInstalado() {
   return window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
 }
 
-export function ehIOS() {
-  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
+export { ehIOS } from './util.js';

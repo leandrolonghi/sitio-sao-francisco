@@ -177,7 +177,7 @@ export function Botao({ children, onClick, tipo = 'primario', icone, href, desat
   const conteudo = html`${icone ? html`<${Icone} nome=${icone} tam=${20} />` : ''}<span>${children}</span>`;
   const cls = `botao botao-${tipo} ${classe}`;
   if (href && !podeAbrir(href)) return null;
-  if (href && /^https?:/.test(href)) return html`<a class=${cls} href=${href} target="_blank" rel="noopener">${conteudo}</a>`;
+  if (href && /^https?:/.test(href)) return html`<a class=${cls} href=${href} target="_blank" rel="noopener" onClick=${onClick}>${conteudo}</a>`;
   if (href) return html`<a class=${cls} href=${href}>${conteudo}</a>`;
   return html`<button class=${cls} type=${submit ? 'submit' : 'button'} onClick=${onClick} disabled=${desativado}>${conteudo}</button>`;
 }
@@ -218,11 +218,17 @@ export function Texto({ rotulo, valor, onChange, placeholder, tipo = 'text', dic
 }
 
 // Endereço em partes, igual na página de pedidos e no app. mudarCampo('bairro') devolve o onChange do campo.
-export function CamposEndereco({ dados, mudarCampo, erros = {} }) {
+// cidadeFixa: a cidade não muda (ex.: a página de pedidos só entrega numa cidade).
+export function CamposEndereco({ dados, mudarCampo, erros = {}, cidadeFixa }) {
   return html`
-    <${Texto} rotulo="Endereço (rua e número)" valor=${dados.endereco} onChange=${mudarCampo('endereco')} placeholder="Rua das Flores, 10" erro=${erros.endereco} autocomplete="address-line1" />
+    <div class="campos-rua">
+      <${Texto} rotulo="Rua" valor=${dados.endereco} onChange=${mudarCampo('endereco')} placeholder="Rua das Flores" erro=${erros.endereco} autocomplete="address-line1" />
+      <${Texto} rotulo="Número" valor=${dados.numero} onChange=${mudarCampo('numero')} placeholder="10" erro=${erros.numero} />
+    </div>
     <${Texto} rotulo="Bairro" valor=${dados.bairro} onChange=${mudarCampo('bairro')} erro=${erros.bairro} />
-    <${Texto} rotulo="Cidade" valor=${dados.cidade} onChange=${mudarCampo('cidade')} erro=${erros.cidade} autocomplete="address-level2" />
+    ${cidadeFixa
+      ? html`<${Campo} rotulo="Cidade" dica="Por enquanto, o sítio entrega só nesta cidade."><input value=${cidadeFixa} disabled /></${Campo}>`
+      : html`<${Texto} rotulo="Cidade" valor=${dados.cidade} onChange=${mudarCampo('cidade')} erro=${erros.cidade} autocomplete="address-level2" />`}
     <${Texto} rotulo="Ponto de referência (opcional)" valor=${dados.referencia} onChange=${mudarCampo('referencia')} placeholder="Ex.: portão verde, perto da igreja" />
   `;
 }

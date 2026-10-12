@@ -2,11 +2,11 @@ import { html, useState, useEffect, useRef } from '../vendor/preact.js';
 import { banco, lerDadosLocais, apagarDadosLocais, COLECOES } from '../db.js';
 import { CATEGORIAS_PADRAO } from '../calc.js';
 import { hoje, plural } from '../util.js';
-import { Tela, Secao, Lista, Linha, Botao, Texto, Campo, CampoDinheiro, Interruptor, Vazio, avisar, baixarArquivo, confirmar, ir, trocar } from '../ui.js';
+import { Tela, Secao, Lista, Linha, Botao, Texto, Campo, Interruptor, Vazio, avisar, baixarArquivo, confirmar, ir, trocar } from '../ui.js';
 import { app, mudar, estaInstalado, pode, AREAS } from '../estado.js';
 import { nomeDoSitio, categoriasDespesa } from './comum.js';
 import { Sincronia } from './inicio.js';
-import { infoLoja, salvarTaxaEntrega, salvarPixDaPagina } from './pedidos.js';
+import { infoLoja, salvarPixDaPagina, resumoEntrega } from './pedidos.js';
 import { lerChavePix, descreverChave } from '../pix.js';
 import { ouvirMembros, salvarMembro, salvarAreas, removerMembro, mensagemErro } from '../nuvem.js';
 import { VERSAO } from '../versao.js';
@@ -16,7 +16,6 @@ export function Ajustes() {
   const [nome, setNome] = useState(aj.nomeSitio || '');
   const [pix, setPix] = useState(aj.chavePix || '');
   const [cats, setCats] = useState(categoriasDespesa().join('\n'));
-  const [taxa, setTaxa] = useState(infoLoja().taxaEntregaCent || null);
   const [enviando, setEnviando] = useState(false);
   const arquivo = useRef();
 
@@ -25,7 +24,6 @@ export function Ajustes() {
   const salvar = () => {
     const categorias = cats.split('\n').map((c) => c.trim()).filter(Boolean);
     banco.salvar('ajustes', { ...aj, id: 'geral', nomeSitio: nome.trim() || null, chavePix: pix.trim() || null, categorias: categorias.length ? [...new Set(categorias)] : CATEGORIAS_PADRAO });
-    salvarTaxaEntrega(taxa);
     salvarPixDaPagina(pix);
     if (pix.trim() && !chavePix) avisar('Ajustes salvos, mas a chave Pix não foi para a página de pedidos: confira a chave.', 'erro');
     else avisar('Ajustes salvos');
@@ -112,12 +110,15 @@ export function Ajustes() {
           erro=${pix.trim() && !chavePix ? 'Não reconheci essa chave. Use CPF, CNPJ, celular com DDD, e-mail ou chave aleatória.' : ''}
           dica=${chavePix ? `Os clientes pagam para: ${descreverChave(chavePix)}. Aparece na página de pedidos e na mensagem de cobrança.` : 'Aparece na página de pedidos (o cliente copia o código Pix com o valor) e na mensagem de cobrança.'}
         />
-        <${CampoDinheiro} rotulo="Valor da entrega" valor=${taxa} onChange=${setTaxa} dica="Aparece no pedido do cliente quando ele escolhe Entregar e vem preenchido nas vendas com entrega (dá para mudar em cada venda). Em branco, não cobra." />
         <${Campo} rotulo="Categorias de despesa" dica="Uma por linha">
           <textarea rows="8" value=${cats} onInput=${(e) => setCats(e.target.value)}></textarea>
         </${Campo}>
         <${Botao} onClick=${salvar} icone="check">Salvar ajustes</${Botao}>
       </div>
+    </${Secao}>
+
+    <${Secao} titulo="Entregas">
+      <${Lista}><${Linha} icone="truck" titulo="Entrega e retirada" sub=${resumoEntrega(infoLoja())} href="#/pedidos/entrega" /></${Lista}>
     </${Secao}>
 
     <${Secao} titulo="Cópia de segurança">

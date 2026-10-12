@@ -2,19 +2,7 @@
 // valor do pedido. O cliente copia o código, abre o app do banco em Pix › Pix Copia e Cola e cola: o banco
 // mostra quem recebe e o valor. Uma página da internet não consegue abrir o app do banco sozinha (não existe
 // um link que abra "o banco" de qualquer pessoa), por isso o caminho é copiar e colar.
-import { soDigitos, formatarTelefone } from './util.js';
-
-export function cpfValido(cpf) {
-  const n = soDigitos(cpf);
-  if (n.length !== 11 || /^(\d)\1+$/.test(n)) return false;
-  const digito = (ate) => {
-    let soma = 0;
-    for (let i = 0; i < ate; i++) soma += Number(n[i]) * (ate + 1 - i);
-    const resto = (soma * 10) % 11;
-    return resto === 10 ? 0 : resto;
-  };
-  return digito(9) === Number(n[9]) && digito(10) === Number(n[10]);
-}
+import { soDigitos, formatarTelefone, cpfValido, formatarCpf } from './util.js';
 
 const celular = (n) => ({ tipo: 'celular', chave: '+55' + n });
 
@@ -42,7 +30,7 @@ export function lerChavePix(texto) {
 // A chave para mostrar ao cliente.
 export function descreverChave({ tipo, chave }) {
   if (tipo === 'celular') return 'Celular ' + formatarTelefone(chave.slice(3));
-  if (tipo === 'cpf') return `CPF ${chave.slice(0, 3)}.${chave.slice(3, 6)}.${chave.slice(6, 9)}-${chave.slice(9)}`;
+  if (tipo === 'cpf') return 'CPF ' + formatarCpf(chave);
   if (tipo === 'cnpj') return `CNPJ ${chave.slice(0, 2)}.${chave.slice(2, 5)}.${chave.slice(5, 8)}/${chave.slice(8, 12)}-${chave.slice(12)}`;
   if (tipo === 'email') return 'E-mail ' + chave;
   return 'Chave aleatória ' + chave;

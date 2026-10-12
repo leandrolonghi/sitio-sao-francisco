@@ -9,7 +9,7 @@ import {
   Tela, Secao, Lista, Linha, Etiqueta, Vazio, Botao, BotaoTopo, Icone, CampoData, Seletor, Segmentado, Escolha,
   CampoDinheiro, EntradaDinheiro, EntradaQtd, AreaTexto, Interruptor, Folha, CamposEndereco, CartaoEndereco, avisar, trocar, voltar, confirmar,
 } from '../ui.js';
-import { camposEndereco, mesmoEndereco, enderecoCompleto, textoOuNulo, CAMPOS_ENDERECO } from '../loja-comum.js';
+import { camposEndereco, mesmoEndereco, enderecoCompleto, textoOuNulo, CAMPOS_ENDERECO, taxaDaEntrega } from '../loja-comum.js';
 import { salvarCliente } from '../cadastros.js';
 import { enderecoDaVenda, marcarEntrega, BotoesMapa, SemEndereco, EnderecoEntrega } from './entregas.js';
 import { dadosDoPedido, mudarPedido, infoLoja } from './pedidos.js';
@@ -129,7 +129,7 @@ export function FormVenda({ id, query = {} }) {
   const [end, setEnd] = useState(() => enderecoInicial(banco.get('clientes', existente?.clienteId || query.cliente), pedido));
   const [mudandoEndereco, setMudandoEndereco] = useState(false);
   // valor da entrega: o da venda, o do pedido ou o padrão dos ajustes da página de pedidos
-  const [entregaCent, setEntregaCent] = useState(() => (existente ? existente.entregaCent : pedido ? pedido.entregaCent : infoLoja().taxaEntregaCent) || null);
+  const [entregaCent, setEntregaCent] = useState(() => (existente ? existente.entregaCent : pedido ? pedido.entregaCent : taxaDaEntrega(infoLoja(), 0)) || null);
   const [erros, setErros] = useState({});
   if (id && !existente) return html`<${NaoEncontrado} voltarPara="/vendas" />`;
 
@@ -202,7 +202,9 @@ export function FormVenda({ id, query = {} }) {
       pagamentos,
       obs: obs.trim() || null,
       vencimento: ficaDevendo ? vencimento : existente?.vencimento || null,
-      entrega: entregar ? { data: dataEntrega, feita: existente?.entrega?.feita || false, feitaEm: existente?.entrega?.feitaEm || null } : null,
+      entrega: entregar
+        ? { data: dataEntrega, feita: existente?.entrega?.feita || false, feitaEm: existente?.entrega?.feitaEm || null, aCaminho: existente?.entrega?.aCaminho || false }
+        : null,
       pedidoId: existente?.pedidoId || pedido?.id || null,
       cancelada: existente?.cancelada || false,
     });
@@ -213,7 +215,7 @@ export function FormVenda({ id, query = {} }) {
       const p = i.produtoId && banco.get('produtos', i.produtoId);
       if (p && p.precoCent == null) banco.salvar('produtos', { ...p, precoCent: i.precoCent });
     }
-    avisar(existente ? 'Venda atualizada' : pedido ? 'Pedido confirmado e venda registrada' : 'Venda registrada');
+    avisar(existente ? 'Venda atualizada' : pedido ? 'Venda registrada. O pedido está em separação.' : 'Venda registrada');
     if (existente) voltar('/vendas/' + doc.id);
     else trocar('/vendas/' + doc.id);
   }
@@ -469,7 +471,7 @@ export function DetalheVenda({ id }) {
           <div class="cartao entrega">
             <div class="entrega-topo">
               <span>${v.entrega.feita ? `Entregue ${dataAmigavel(v.entrega.feitaEm)}` : `Entregar ${dataAmigavel(v.entrega.data || v.data)}`}</span>
-              <${Etiqueta} tipo=${v.entrega.feita ? 'ok' : 'info'}>${v.entrega.feita ? 'Entregue' : 'A entregar'}</${Etiqueta}>
+              <${Etiqueta} tipo=${v.entrega.feita || v.entrega.aCaminho ? 'ok' : 'info'}>${v.entrega.feita ? 'Entregue' : v.entrega.aCaminho ? 'A caminho' : 'A entregar'}</${Etiqueta}>
             </div>
             ${endereco ? html`<${EnderecoEntrega} v=${v} endereco=${endereco} />` : html`<${SemEndereco} venda=${v} />`}
             <div class="botoes">

@@ -3,11 +3,12 @@
 // nome e endereço. O que muda de um lado vai para o outro:
 //  - o cliente muda o cadastro na página: o app copia para o cliente (conferirCadastros);
 //  - o sítio muda o cliente no app: o app grava no cadastro (salvarCliente) e a página mostra.
+// Vão de um lado para o outro: nome, CPF e endereço (rua, número, bairro, cidade e ponto de referência).
 // O cliente ligado guarda o telefone do cadastro (campo "cadastro") e a versão do cadastro que já tem ("cadastroSinc").
 import { banco } from './db.js';
 import { mesmoTelefone, telefoneNormal, CAMPOS_ENDERECO } from './loja-comum.js';
 
-const CAMPOS = ['nome', ...CAMPOS_ENDERECO];
+const CAMPOS = ['nome', 'cpf', ...CAMPOS_ENDERECO];
 
 const dadosDoCadastro = (c) => Object.fromEntries(CAMPOS.map((k) => [k, c?.[k] || null]));
 const mesmosDados = (a, b) => CAMPOS.every((k) => (a?.[k] || null) === (b?.[k] || null));

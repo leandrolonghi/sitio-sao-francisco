@@ -12,7 +12,7 @@ import { ListaEstoque, LancarMovimento, EstoqueProduto, ListaProdutos, FormProdu
 import { Relatorios } from './paginas/relatorios.js';
 import { Ajustes, Acesso, AcessoPessoa } from './paginas/ajustes.js';
 import { Entregas } from './paginas/entregas.js';
-import { Pedidos, AjustesPagina, pedidosNovos, acompanharPixDaPagina } from './paginas/pedidos.js';
+import { Pedidos, AjustesPagina, AjustesEntrega, pedidosNovos, acompanharPaginaDePedidos } from './paginas/pedidos.js';
 import { entregasPendentes } from './calc.js';
 import { acompanharCadastros } from './cadastros.js';
 import { NaoEncontrado, SemPermissao } from './paginas/comum.js';
@@ -61,7 +61,9 @@ function escolherTela({ caminho, partes, query }) {
     case 'entregas':
       return [html`<${Entregas} />`, true];
     case 'pedidos':
-      return b === 'pagina' ? [html`<${AjustesPagina} />`, false] : [html`<${Pedidos} />`, true];
+      if (b === 'pagina') return [html`<${AjustesPagina} />`, false];
+      if (b === 'entrega') return [html`<${AjustesEntrega} />`, false];
+      return [html`<${Pedidos} />`, true];
     case 'clientes':
     case 'fornecedores':
       if (!b) return [html`<${ListaPessoas} col=${a} />`, true];
@@ -255,7 +257,7 @@ async function iniciar() {
   const nuvem = await iniciarNuvem(nuvemCfg.config, { emulador: nuvemCfg.emulador });
   mudar({ modo: 'nuvem', nuvem });
   acompanharCadastros(); // quem se cadastra na página de pedidos aparece em Clientes
-  acompanharPixDaPagina(); // chave Pix dos Ajustes vai para a página de pedidos
+  acompanharPaginaDePedidos(); // numera os pedidos e leva a chave Pix dos Ajustes para a página de pedidos
   render(comAvisos(html`<${RaizNuvem} nuvem=${nuvem} />`), raiz);
 }
 

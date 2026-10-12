@@ -73,10 +73,12 @@ service cloud.firestore {
     function cadastroValido(tel) {
       let d = request.resource.data;
       let agora = request.time.toMillis();
-      return d.keys().hasOnly(['telefone', 'nome', 'endereco', 'bairro', 'cidade', 'referencia', 'criadoEm', 'atualizadoEm'])
+      return d.keys().hasOnly(['telefone', 'nome', 'cpf', 'endereco', 'numero', 'bairro', 'cidade', 'referencia', 'criadoEm', 'atualizadoEm'])
         && d.telefone == tel
         && d.nome is string && d.nome.size() >= 2 && d.nome.size() <= 80
+        && textoOpcional(d, 'cpf', 14)
         && textoOpcional(d, 'endereco', 200)
+        && textoOpcional(d, 'numero', 20)
         && textoOpcional(d, 'bairro', 100)
         && textoOpcional(d, 'cidade', 100)
         && textoOpcional(d, 'referencia', 200)
@@ -103,7 +105,7 @@ service cloud.firestore {
       allow read: if true;
     }
 
-    // Página de pedidos: cadastro do cliente (nome e endereço), guardado pelo telefone.
+    // Página de pedidos: cadastro do cliente (nome, CPF e endereço), guardado pelo telefone.
     // O app também lê e muda (regra de cima), para o cadastro ser o mesmo nos dois.
     match /cadastros/{tel} {
       allow read: if responsavel() || membro() || (cliente() && tel == telefoneDoCliente());

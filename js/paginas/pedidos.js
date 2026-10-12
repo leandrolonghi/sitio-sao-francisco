@@ -2,8 +2,11 @@
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { dinheiro, qtd, hoje, addDias, dataAmigavel, dataBR, formatarTelefone, linkWhatsApp, plural, ordenarPorNome } from '../util.js';
-import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, Interruptor, Texto, CampoDinheiro, avisar, confirmar, ir } from '../ui.js';
-import { INFO_LOJA, STATUS_PEDIDO, separarPagamento } from '../loja-comum.js';
+import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, Interruptor, Texto, Campo, CampoDinheiro, avisar, confirmar, ir } from '../ui.js';
+import {
+  INFO_LOJA, STATUS_PEDIDO, DIAS_DA_SEMANA, separarPagamento, nomeDoPedido, diasDeEntrega, textoDiasDeEntrega, freteGratisAPartir, linkDaRetirada, textoOuNulo,
+} from '../loja-comum.js';
+import { ehIOS } from '../estado.js';
 import { lerChavePix } from '../pix.js';
 import { clienteDoPedido } from '../cadastros.js';
 import { nomeDoSitio } from './comum.js';
@@ -17,12 +20,8 @@ export const pedidosNovos = () => banco.lista('pedidos').filter((p) => p.status 
 
 export const infoLoja = () => banco.get('catalogo', INFO_LOJA) || { aberta: true };
 
-// Valor da entrega (fica junto com os dados da página, que os clientes leem). Muda nos Ajustes ou nos ajustes da página.
-export function salvarTaxaEntrega(taxa) {
-  const valor = taxa > 0 ? taxa : null;
-  if ((infoLoja().taxaEntregaCent || null) === valor) return;
-  banco.salvar('catalogo', { tipo: 'loja', nome: nomeDoSitio(), ...infoLoja(), id: INFO_LOJA, taxaEntregaCent: valor });
-}
+// Muda os dados da página de pedidos (documento _loja do catálogo, que os clientes leem).
+const salvarInfoLoja = (mudanca) => banco.salvar('catalogo', { tipo: 'loja', nome: nomeDoSitio(), ...infoLoja(), ...mudanca, id: INFO_LOJA });
 
 // Chave Pix do sítio na página de pedidos (os clientes copiam o código Pix com o valor do pedido). A chave fica
 // nos Ajustes (também vai na mensagem de cobrança); aqui vai já entendida: tipo e chave no formato do Pix.
@@ -30,18 +29,52 @@ export function salvarPixDaPagina(texto) {
   const pix = lerChavePix(texto);
   const info = infoLoja();
   if ((info.pixChave || null) === (pix?.chave || null) && (info.pixTipo || null) === (pix?.tipo || null)) return;
-  banco.salvar('catalogo', { tipo: 'loja', nome: nomeDoSitio(), ...info, id: INFO_LOJA, pixChave: pix?.chave || null, pixTipo: pix?.tipo || null });
+  salvarInfoLoja({ pixChave: pix?.chave || null, pixTipo: pix?.tipo || null });
 }
 
-// Chave Pix posta nos Ajustes antes de a página ter Pix: leva para a página quando os dados chegam do servidor.
-export function acompanharPixDaPagina() {
+// Numera os pedidos na ordem em que chegaram (1, 2, 3…); o cliente vê o número em "Meus pedidos".
+// Todos os aparelhos fazem a mesma conta, então dois celulares abertos dão o mesmo número.
+export function numerarPedidos() {
+  const todos = banco.lista('pedidos');
+  let ultimo = Math.max(0, ...todos.map((p) => p.numero || 0));
+  const semNumero = todos.filter((p) => !p.numero).sort((a, b) => (a.criadoEm || 0) - (b.criadoEm || 0) || a.id.localeCompare(b.id));
+  for (const p of semNumero) banco.salvar('pedidos', { ...p, numero: ++ultimo });
+}
+
+// Quando os dados chegam do servidor: numera os pedidos novos e leva para a página a chave Pix dos Ajustes
+// (inclusive a que foi posta antes de a página ter Pix).
+export function acompanharPaginaDePedidos() {
   let relogio = null;
   return banco.ouvir(() => {
     clearTimeout(relogio);
     relogio = setTimeout(() => {
+      if (banco.prontas.has('pedidos')) numerarPedidos();
       if (banco.prontas.has('ajustes') && banco.prontas.has('catalogo')) salvarPixDaPagina(banco.ajustes().chavePix);
     }, 1500);
   });
+}
+
+// Saí para entregar: o pedido fica "Saiu para entrega" na página e a venda, "a caminho" em Entregas.
+export function saiuParaEntregar(pedido, venda) {
+  if (pedido && pedido.status !== 'em_rota') mudarPedido(pedido.id, { status: 'em_rota' });
+  const v = venda || (pedido?.vendaId && banco.get('vendas', pedido.vendaId));
+  if (v?.entrega && !v.entrega.aCaminho) banco.salvar('vendas', { ...v, entrega: { ...v.entrega, aCaminho: true } });
+}
+
+// Mensagem do WhatsApp avisando o cliente que o sítio saiu para entregar.
+export function mensagemSaida(nome, pedido) {
+  const primeiro = (nome || '').trim().split(' ')[0];
+  return `Olá${primeiro ? ', ' + primeiro : ''}! Aqui é do ${nomeDoSitio()}. Saí para entregar o seu pedido${pedido?.numero ? ' nº ' + pedido.numero : ''}. Daqui a pouco chego aí!`;
+}
+
+// Botão "Saí para entregar": abre o WhatsApp com a mensagem pronta (é só tocar em enviar) e muda o pedido.
+export function BotaoSaida({ telefone, nome, pedido, venda, aCaminho }) {
+  return html`<${Botao}
+    tipo=${aCaminho ? 'secundario' : 'primario'}
+    icone="truck"
+    href=${linkWhatsApp(telefone, mensagemSaida(nome, pedido))}
+    onClick=${() => saiuParaEntregar(pedido, venda)}
+  >${aCaminho ? 'Avisar de novo no WhatsApp' : 'Saí para entregar'}</${Botao}>`;
 }
 
 // Coloca (ou tira) o produto da página de pedidos. Só vão para lá nome, unidade, preço, descrição e a versão
@@ -82,7 +115,7 @@ function ItensPedido({ p }) {
 }
 
 function CartaoPedido({ p }) {
-  const { forma, obs } = separarPagamento(p.obs);
+  const { forma, detalhe, obs } = separarPagamento(p.obs);
   const virarVenda = () => ir(`/vendas/nova?pedido=${p.id}&cliente=${clienteDoPedido(p)}`);
   const recusar = () => {
     if (!confirmar(`Recusar o pedido de ${p.nome}? Ele vai aparecer como "não aceito" para o cliente.`)) return;
@@ -92,16 +125,16 @@ function CartaoPedido({ p }) {
   return html`<div class="cartao pedido">
     <div class="entrega-topo">
       <strong>${p.nome}</strong>
-      <span class="suave pequeno">${dataAmigavel(diaDe(p.criadoEm))} ${horaDe(p.criadoEm)}</span>
+      <span class="suave pequeno">${p.numero ? 'nº ' + p.numero + ' · ' : ''}${dataAmigavel(diaDe(p.criadoEm))} ${horaDe(p.criadoEm)}</span>
     </div>
     <p class="suave">${formatarTelefone(p.telefone)}</p>
     <${ItensPedido} p=${p} />
     ${p.totalCent ? html`<p><strong>Total estimado: ${dinheiro(p.totalCent)}</strong></p>` : ''}
     <p class="entrega-endereco">
       <${Icone} nome=${p.entrega === 'entregar' ? 'truck' : 'house'} tam=${18} />
-      <span>${p.entrega === 'entregar' ? 'Entregar' + (p.endereco ? ': ' + p.endereco : '') : 'Vai retirar no sítio'}${p.dataDesejada ? ` · para ${dataBR(p.dataDesejada)}` : ''}</span>
+      <span>${p.entrega === 'entregar' ? 'Entregar' + (p.endereco ? ': ' + p.endereco : '') : 'Vai retirar no local'}${p.dataDesejada ? ` · para ${dataBR(p.dataDesejada)}` : ''}</span>
     </p>
-    ${forma ? html`<p class="entrega-endereco"><${Icone} nome="wallet" tam=${18} /><span>Pagamento: ${forma}</span></p>` : ''}
+    ${forma ? html`<p class="entrega-endereco"><${Icone} nome="wallet" tam=${18} /><span>Pagamento: ${forma}${detalhe ? ` (${detalhe})` : ''}</span></p>` : ''}
     ${obs ? html`<p class="suave" style="white-space:pre-line">“${obs}”</p>` : ''}
     <div class="botoes">
       <${Botao} icone="shopping-cart" onClick=${virarVenda}>Transformar em venda</${Botao}>
@@ -114,7 +147,7 @@ function CartaoPedido({ p }) {
 export function Pedidos() {
   const todos = [...banco.lista('pedidos')].sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0));
   const novos = todos.filter((p) => p.status === 'novo').reverse();
-  const confirmados = todos.filter((p) => p.status === 'confirmado');
+  const confirmados = todos.filter((p) => p.status === 'confirmado' || p.status === 'em_rota');
   const limite = addDias(hoje(), -14);
   const antigos = todos.filter((p) => ['entregue', 'recusado', 'cancelado'].includes(p.status) && diaDe(p.atualizadoEm || p.criadoEm) >= limite);
   const link = linkDaPagina();
@@ -146,15 +179,16 @@ export function Pedidos() {
       : html`<${Vazio} icone="shopping-cart" texto="Nenhum pedido novo. Os pedidos que os clientes fizerem pela página aparecem aqui." />`}
 
     ${confirmados.length
-      ? html`<${Secao} titulo="Confirmados, falta entregar">
+      ? html`<${Secao} titulo="Em separação, falta entregar">
           ${confirmados.map(
             (p) => html`<div class="cartao pedido" key=${p.id}>
               <div class="entrega-topo">
                 <strong>${p.nome}</strong>
-                ${p.totalCent ? html`<span>${dinheiro(p.totalCent)}</span>` : ''}
+                <${Etiqueta} tipo=${p.status === 'em_rota' ? 'info' : 'ok'}>${STATUS_PEDIDO[p.status].nome}</${Etiqueta}>
               </div>
-              <p class="suave">${(p.entrega === 'entregar' ? 'Entregar' : 'Vai retirar no sítio') + (p.dataDesejada ? ' · ' + dataAmigavel(p.dataDesejada) : '')}</p>
+              <p class="suave">${[p.numero ? 'nº ' + p.numero : '', p.entrega === 'entregar' ? 'Entregar' : 'Vai retirar no local', p.dataDesejada ? dataAmigavel(p.dataDesejada) : '', p.totalCent ? dinheiro(p.totalCent) : ''].filter(Boolean).join(' · ')}</p>
               <div class="botoes">
+                ${p.entrega === 'entregar' ? html`<${BotaoSaida} telefone=${p.telefone} nome=${p.nome} pedido=${p} aCaminho=${p.status === 'em_rota'} />` : ''}
                 <${Botao} tipo="secundario" icone="check" onClick=${() => concluir(p)}>${p.entrega === 'entregar' ? 'Foi entregue' : 'Cliente retirou'}</${Botao}>
               </div>
               ${p.vendaId ? html`<a class="entrega-ver" href=${'#/vendas/' + p.vendaId}>Ver a venda</a>` : ''}
@@ -186,11 +220,10 @@ export function AjustesPagina() {
   const info = infoLoja();
   const [aberta, setAberta] = useState(info.aberta !== false);
   const [whatsapp, setWhatsapp] = useState(info.whatsapp || '');
-  const [taxa, setTaxa] = useState(info.taxaEntregaCent || null);
   const produtos = ordenarPorNome(banco.lista('produtos').filter((p) => p.ativo !== false));
 
   const salvar = () => {
-    banco.salvar('catalogo', { id: INFO_LOJA, tipo: 'loja', nome: nomeDoSitio(), aberta, whatsapp: whatsapp.trim() || null, taxaEntregaCent: taxa > 0 ? taxa : null });
+    salvarInfoLoja({ aberta, whatsapp: whatsapp.trim() || null });
     avisar('Página de pedidos atualizada');
   };
   const mostrar = (p, sim) => {
@@ -204,7 +237,7 @@ export function AjustesPagina() {
       <${Interruptor} rotulo="Receber pedidos pela página" dica="Desligado, a página avisa que não está recebendo pedidos" valor=${aberta} onChange=${setAberta} />
     </div>
     <${Texto} rotulo="WhatsApp do sítio" valor=${whatsapp} onChange=${setWhatsapp} tipo="tel" placeholder="(19) 99999-9999" dica="Depois de pedir, o cliente pode te avisar por aqui" />
-    <${CampoDinheiro} rotulo="Valor da entrega" valor=${taxa} onChange=${setTaxa} dica="Soma no pedido quando o cliente escolhe Entregar. Em branco, a entrega não é cobrada. Em cada venda dá para mudar." />
+    <${Lista}><${Linha} icone="truck" titulo="Entrega e retirada" sub=${resumoEntrega(info)} href="#/pedidos/entrega" /></${Lista}>
     <${Secao} titulo="Produtos que aparecem na página">
       ${produtos.length
         ? html`<div class="cartao interruptores">
@@ -220,6 +253,89 @@ export function AjustesPagina() {
           </div>
           <p class="campo-dica">Muda na hora. Preço e nome vêm do cadastro do produto.</p>`
         : html`<p class="suave">Cadastre produtos primeiro em Mais › Produtos.</p>`}
+    </${Secao}>
+  </${Tela}>`;
+}
+
+// Resumo do que está em Entrega e retirada (para a linha que abre a tela).
+export function resumoEntrega(info) {
+  const dias = diasDeEntrega(info);
+  const aPartir = freteGratisAPartir(info);
+  return [
+    info.taxaEntregaCent > 0 ? (info.freteGratis ? 'frete grátis (promoção)' : 'entrega ' + dinheiro(info.taxaEntregaCent)) : 'entrega sem valor',
+    aPartir ? 'grátis a partir de ' + dinheiro(aPartir) : '',
+    dias.length && dias.length < 7 ? textoDiasDeEntrega(dias) : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+// Entrega e retirada: valor da entrega, frete grátis, dias de entrega e o local para retirar. Fica com os dados
+// da página de pedidos (os clientes leem); as vendas com entrega usam o mesmo valor.
+export function AjustesEntrega() {
+  const info = infoLoja();
+  const [taxa, setTaxa] = useState(info.taxaEntregaCent || null);
+  const [promocao, setPromocao] = useState(!!info.freteGratis);
+  const [aPartir, setAPartir] = useState(info.freteGratisAcimaCent || null);
+  const [dias, setDias] = useState(() => diasDeEntrega(info));
+  const [retirada, setRetirada] = useState(info.retiradaEndereco || '');
+  const [ponto, setPonto] = useState(info.retiradaLat != null ? { lat: info.retiradaLat, lng: info.retiradaLng } : null);
+  const [buscando, setBuscando] = useState(false);
+
+  const salvar = () => {
+    salvarInfoLoja({
+      taxaEntregaCent: taxa > 0 ? taxa : null,
+      freteGratis: promocao,
+      freteGratisAcimaCent: aPartir > 0 ? aPartir : null,
+      diasEntrega: [...dias].sort((a, b) => a - b),
+      retiradaEndereco: textoOuNulo(retirada),
+      retiradaLat: ponto ? ponto.lat : null,
+      retiradaLng: ponto ? ponto.lng : null,
+    });
+    avisar('Entrega e retirada salvas');
+  };
+  const alternarDia = (d) => setDias((ds) => (ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d]));
+  // marca o ponto exato do local de retirada (a pessoa precisa estar lá)
+  const marcarAqui = () => {
+    if (!navigator.geolocation) return avisar('Este celular não informa a localização.', 'erro');
+    setBuscando(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPonto({ lat: Math.round(pos.coords.latitude * 1e6) / 1e6, lng: Math.round(pos.coords.longitude * 1e6) / 1e6 });
+        setBuscando(false);
+        avisar('Localização marcada. Toque em Salvar.');
+      },
+      () => {
+        setBuscando(false);
+        avisar('Não consegui a localização. Confira se o celular deixa o app usar a localização.', 'erro');
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    );
+  };
+  const mapa = ponto ? linkDaRetirada({ retiradaLat: ponto.lat, retiradaLng: ponto.lng, nome: nomeDoSitio() }, ehIOS()) : null;
+
+  return html`<${Tela} titulo="Entrega e retirada" voltarPara="/ajustes" classe="formulario" rodape=${html`<${Botao} icone="check" onClick=${salvar}>Salvar</${Botao}>`}>
+    <${CampoDinheiro} rotulo="Valor da entrega" valor=${taxa} onChange=${setTaxa} dica="Soma no pedido quando o cliente escolhe Entregar e vem preenchido nas vendas com entrega (dá para mudar em cada venda). Em branco, não cobra." />
+    <div class="cartao">
+      <${Interruptor} rotulo="Promoção: frete grátis" dica="Ligado, nenhuma entrega é cobrada e a página de pedidos avisa os clientes" valor=${promocao} onChange=${setPromocao} />
+    </div>
+    <${CampoDinheiro} rotulo="Frete grátis a partir de" valor=${aPartir} onChange=${setAPartir} dica="Pedidos a partir deste valor (sem contar a entrega) não pagam entrega, e a página avisa os clientes. Em branco, não tem. Durante a promoção não conta: já é tudo grátis." />
+    <${Campo} div rotulo="Dias de entrega" dica=${dias.length ? 'Na página, o cliente só escolhe estes dias para receber.' : 'Nenhum marcado: o cliente escolhe qualquer dia.'}>
+      <div class="dias-semana" role="group">
+        ${[1, 2, 3, 4, 5, 6, 0].map((d) => html`<button type="button" class=${dias.includes(d) ? 'ativo' : ''} aria-pressed=${dias.includes(d)} onClick=${() => alternarDia(d)}>${DIAS_DA_SEMANA[d].slice(0, 3)}</button>`)}
+      </div>
+    </${Campo}>
+    <${Secao} titulo="Retirar no local">
+      <div class="formulario">
+        <${Texto} rotulo="Endereço para retirar" valor=${retirada} onChange=${setRetirada} placeholder="Ex.: Rua das Flores, 100, Centro" dica="Aparece para o cliente que escolhe Retirar no local, com o botão do mapa." />
+        <div class="cartao">
+          <p style="margin:0 0 12px">${ponto ? html`Localização marcada no mapa. <a href=${mapa} target="_blank" rel="noopener">Ver no mapa</a>` : 'Para o cliente achar fácil, marque o ponto no mapa: estando no local, toque no botão.'}</p>
+          <div class="botoes">
+            <${Botao} tipo="secundario" icone="locate-fixed" onClick=${marcarAqui} desativado=${buscando}>${buscando ? 'Buscando a localização…' : ponto ? 'Marcar de novo onde estou' : 'Usar a localização deste celular'}</${Botao}>
+            ${ponto ? html`<${Botao} tipo="secundario" icone="x" onClick=${() => setPonto(null)}>Tirar a localização</${Botao}>` : ''}
+          </div>
+        </div>
+      </div>
     </${Secao}>
   </${Tela}>`;
 }

@@ -3,7 +3,7 @@ import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { pode } from '../estado.js';
 import { saldosPorCliente, vendasAbertas, alocarPagamento, saldoVenda, totalVenda, totalAReceber, situacaoVencimento, fiadoVencido } from '../calc.js';
-import { dinheiro, dataAmigavel, dataBR, dataCurta, formatarTelefone, soDigitos, contem, ordenarPorNome, novoId, linkWhatsApp, plural, qtd, hoje, diasEntre } from '../util.js';
+import { dinheiro, dataAmigavel, dataBR, dataCurta, formatarTelefone, soDigitos, contem, ordenarPorNome, novoId, linkWhatsApp, plural, qtd, hoje, diasEntre, cpfValido, formatarCpf } from '../util.js';
 import { Tela, Secao, Lista, Linha, Vazio, Botao, BotaoTopo, Icone, Texto, AreaTexto, Interruptor, Numero, CamposEndereco, avisar, trocar, voltar, confirmar } from '../ui.js';
 import { CAMPOS_ENDERECO, camposEndereco, enderecoCompleto, textoOuNulo } from '../loja-comum.js';
 import { salvarCliente, apagarCliente } from '../cadastros.js';
@@ -53,6 +53,8 @@ export function FormPessoa({ col, id }) {
   const ligado = ehCliente && !!existente?.cadastro;
   const [nome, setNome] = useState(existente?.nome || '');
   const [telefone, setTelefone] = useState(existente?.telefone || '');
+  const [cpf, setCpf] = useState(formatarCpf(existente?.cpf));
+  const [erroCpf, setErroCpf] = useState('');
   const [end, setEnd] = useState(() => camposEndereco(existente));
   const [obs, setObs] = useState(existente?.obs || '');
   const [ativo, setAtivo] = useState(existente?.ativo !== false);
@@ -63,11 +65,12 @@ export function FormPessoa({ col, id }) {
 
   const salvar = () => {
     if (nome.trim().length < (ligado ? 2 : 1)) return setErro('Digite o nome.');
+    if (ehCliente && cpf.trim() && !cpfValido(cpf)) return setErroCpf('CPF inválido. Confira os números.');
     const dados = {
       ...(existente || {}),
       nome: textoOuNulo(nome),
       telefone: ligado ? existente.telefone : telefone.trim() || null,
-      ...(ehCliente ? Object.fromEntries(CAMPOS_ENDERECO.map((k) => [k, textoOuNulo(end[k])])) : { endereco: end.endereco.trim() || null }),
+      ...(ehCliente ? { cpf: soDigitos(cpf) || null, ...Object.fromEntries(CAMPOS_ENDERECO.map((k) => [k, textoOuNulo(end[k])])) } : { endereco: end.endereco.trim() || null }),
       obs: obs.trim() || null,
       ativo,
     };
@@ -93,12 +96,13 @@ export function FormPessoa({ col, id }) {
   >
     ${ligado
       ? html`<div class="faixa"><${Icone} nome="circle-user-round" /><div class="faixa-corpo">
-          <p>Tem cadastro na página de pedidos. O nome e o endereço que você mudar aqui aparecem para o cliente lá.</p>
+          <p>Tem cadastro na página de pedidos. O nome, o CPF e o endereço que você mudar aqui aparecem para o cliente lá.</p>
           <p>Telefone: <strong>${formatarTelefone(existente.telefone)}</strong>. É com ele que o cliente entra na página, por isso não muda aqui.</p>
         </div></div>`
       : ''}
     <${Texto} rotulo="Nome" valor=${nome} onChange=${(v) => (setNome(v), setErro(''))} erro=${erro} autoFocus=${!existente} autocomplete="name" />
     ${ligado ? '' : html`<${Texto} rotulo="Telefone / WhatsApp" valor=${telefone} onChange=${setTelefone} tipo="tel" placeholder="(19) 99999-9999" autocomplete="tel" />`}
+    ${ehCliente ? html`<${Texto} rotulo="CPF (opcional)" valor=${cpf} onChange=${(v) => (setCpf(v), setErroCpf(''))} modo="numeric" placeholder="000.000.000-00" erro=${erroCpf} />` : ''}
     ${ehCliente
       ? html`<${CamposEndereco} dados=${end} mudarCampo=${mudarEndereco} />`
       : html`<${Texto} rotulo="Endereço" valor=${end.endereco} onChange=${mudarEndereco('endereco')} placeholder="Opcional" />`}
@@ -184,7 +188,7 @@ export function DetalhePessoa({ col, id }) {
   }
 
   return html`<${Tela} titulo=${p.nome} voltarPara=${'/' + col} direita=${html`<${BotaoTopo} icone="pencil" rotulo="Editar" href=${`#/${col}/${p.id}/editar`} />`}>
-    ${tel || endereco || p.obs
+    ${tel || endereco || p.obs || p.cpf
       ? html`<div class="cartao" style="margin-bottom:16px">
           ${tel ? html`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
                 <span>${formatarTelefone(p.telefone)}</span>
@@ -195,6 +199,7 @@ export function DetalhePessoa({ col, id }) {
               </div>`
             : ''}
           ${endereco ? html`<p class="suave" style="margin:${tel ? '8px' : '0'} 0 0">${endereco}${p.referencia ? html`<br />${p.referencia}` : ''}</p>` : ''}
+          ${p.cpf ? html`<p class="suave" style="margin:8px 0 0">CPF ${formatarCpf(p.cpf)}</p>` : ''}
           ${p.obs ? html`<p class="suave" style="margin:8px 0 0">${p.obs}</p>` : ''}
           ${p.cadastro ? html`<p class="suave pequeno" style="margin:8px 0 0">Tem cadastro na página de pedidos.</p>` : ''}
         </div>`

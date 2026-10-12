@@ -12,7 +12,10 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 - **Foto e descrição dos produtos** (no cadastro do produto): aparecem para os clientes na página de pedidos
 - **Pix no pedido**: o cliente escolhe como vai pagar (Pix, dinheiro ou cartão); no Pix, copia o código
   "Pix Copia e Cola" com o valor do pedido e cola no app do banco. A chave fica em Ajustes
-- **Valor da entrega** (em Ajustes): cobrado no pedido da página e na venda (dá para mudar em cada venda)
+- **Entrega e retirada** (em Ajustes): valor da entrega, promoção de frete grátis, frete grátis a partir de um
+  valor, dias da semana em que o sítio entrega e o local de retirada (endereço e ponto no mapa)
+- **Pedidos numerados e acompanhados**: o cliente vê o pedido "Em separação" quando vira venda e "Saiu para
+  entrega" quando o sítio toca em **Saí para entregar** (abre o WhatsApp com a mensagem pronta para o cliente)
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
 - **Estoque e produção**: produção do dia, entradas, perdas, consumo e acerto de contagem; as vendas descontam sozinhas
 - **Produtos, clientes e fornecedores**
@@ -53,8 +56,11 @@ os dados ficam só no aparelho. Depois de ligar a nuvem, o app oferece enviar es
 Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-francisco/pedido/**
 (no app: **Mais → Pedidos dos clientes → Mandar o link para clientes**).
 
-- O cliente faz um **cadastro** (nome, telefone, endereço e uma senha de 4 números) e depois entra com
-  **telefone e senha**: o endereço já vem preenchido no pedido (dá para mudar, e o cadastro é atualizado).
+- O cliente faz um **cadastro** (nome, telefone, CPF opcional, endereço com rua e número separados e uma senha
+  de 4 números) e depois entra com **telefone e senha**: o endereço já vem preenchido no pedido (dá para mudar,
+  e o cadastro é atualizado). A cidade é fixa (`CIDADE_ATENDIDA` em `js/loja-comum.js`): por enquanto o sítio só
+  entrega em Campo Novo do Parecis - MT. Endereços antigos, com o número junto da rua ("Rua A, 10"), aparecem
+  separados na hora.
   Por trás, cada cliente é uma conta de e-mail e senha do Firebase com o e-mail
   `<telefone>@cliente.<projeto>.firebaseapp.com` (ninguém recebe e-mail nesse domínio). O telefone não é
   confirmado por SMS: quem cadastrar um número primeiro fica com ele.
@@ -62,28 +68,38 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
   procurar pelo telefone → Excluir conta) e o cliente faz o cadastro de novo com o mesmo telefone, sem perder
   os pedidos.
 - Quem se cadastra na página aparece em **Clientes** no app (se o sítio já tinha um cliente com o mesmo
-  telefone, ele fica ligado a esse, sem repetir). Nome e endereço são os mesmos dos dois lados: o que o cliente
+  telefone, ele fica ligado a esse, sem repetir). Nome, CPF e endereço são os mesmos dos dois lados: o que o cliente
   muda na página aparece no app, e o que o sítio muda no app aparece na página. O telefone não muda no app (é o
   login do cliente). Apagar o cliente no app apaga também o cadastro da página; na próxima vez, a pessoa preenche
   de novo. Isso fica em `js/cadastros.js`.
 - Os produtos que aparecem são escolhidos em **Pedidos dos clientes → Produtos e ajustes da página** (ou no
   cadastro do produto). Só vão para a página nome, unidade, preço, descrição e foto. Lá também dá para fechar a página, colocar
-  o WhatsApp do sítio. O **valor da entrega** fica em **Ajustes** (e também aparece ali): a página mostra o valor
-  ao escolher os produtos e soma no pedido quando o cliente escolhe Entregar. Na venda, o valor da entrega vem
-  preenchido (do pedido, ou o dos Ajustes) e dá para mudar.
+  o WhatsApp do sítio e abrir **Entrega e retirada** (também em **Ajustes**), que fica no documento `_loja` do
+  catálogo: valor da entrega (`taxaEntregaCent`), promoção de frete grátis (`freteGratis`), frete grátis a partir
+  de um valor dos itens (`freteGratisAcimaCent`, que não conta durante a promoção), dias de entrega
+  (`diasEntrega`, 0 = domingo) e local de retirada (`retiradaEndereco`, `retiradaLat`, `retiradaLng`). A tela
+  inicial da página avisa o frete grátis e os dias; ao finalizar, com dias marcados o cliente só escolhe uma das
+  próximas datas de entrega (retirando, a data é livre). Na venda, o valor da entrega vem preenchido (do pedido,
+  ou o padrão) e dá para mudar.
 - A **foto do produto** é escolhida no cadastro do produto (câmera ou galeria) e o app a reduz (até 600 pixels,
   JPEG, uns 100 KB). Ela fica no próprio banco, na coleção `fotos` (um documento por produto), e não no Firebase
   Storage, que em projetos novos só funciona no plano pago. A página guarda as fotos no celular do cliente e só
   baixa de novo quando a foto muda (`fotoEm` no catálogo). Isso fica em `js/foto.js`.
 - O cliente escolhe **como vai pagar** (Pix, Dinheiro ou Cartão). A forma vai na primeira linha da observação
-  do pedido ("Pagamento: Pix"), um campo que as regras já aceitam; o app mostra essa linha à parte e a usa
+  do pedido ("Pagamento: Pix", ou "Pagamento: Dinheiro · troco para R$ 50,00" quando precisa de troco), um
+  campo que as regras já aceitam; o app mostra essa linha à parte e a usa
   para preencher a forma de pagamento da venda. No Pix, a página monta o código **Pix Copia e Cola** (BR Code
   estático do Banco Central, com o valor do pedido quando todos os itens têm preço) a partir da chave Pix dos
   **Ajustes**, que o app leva para o documento `_loja` do catálogo já entendida (tipo e chave, `js/pix.js`).
   Uma página da internet não consegue abrir o app do banco de qualquer pessoa: o cliente copia o código e
   cola em Pix › Pix Copia e Cola no banco, que mostra quem recebe e o valor.
-- O pedido chega no app como **novo**; **Transformar em venda** abre a venda já preenchida e, ao registrar,
-  o cliente vê **Confirmado**. Quando a entrega é marcada como feita, o cliente vê **Entregue**.
+- O pedido chega no app como **novo** e ganha um número (1, 2, 3…, na ordem em que chegaram; quem numera é o app,
+  `numerarPedidos` em `js/paginas/pedidos.js`). **Transformar em venda** abre a venda já preenchida e, ao
+  registrar, o cliente vê **Em separação**. Em Entregas (e em Pedidos), **Saí para entregar** abre o WhatsApp
+  com a mensagem pronta para o cliente (é só tocar em enviar: mandar sozinho exigiria um serviço pago) e o
+  cliente vê **Saiu para entrega**. Quando a entrega é marcada como feita, o cliente vê **Entregue**.
+- Em **Meus pedidos** cada pedido aparece resumido (número, data, valor e situação); tocando, abre os itens,
+  a forma de pagamento, o Pix e o botão de cancelar.
 - Enquanto o sítio não responde, o cliente pode **cancelar o pedido** em Meus pedidos; no app ele sai dos
   pedidos novos e aparece como **Cancelado**. Depois de confirmado ou recusado, só o sítio muda.
 - As regras do banco deixam quem não tem login só ver o catálogo e as fotos. O cliente logado vê e muda só o próprio
@@ -135,6 +151,7 @@ node ../tests/e2e-local.mjs http://localhost:8123   # teste com tela de iPhone (
 projeto `demo-sitio`), e `tests/e2e-nuvem.mjs` testa login, acesso, sincronização e modo offline com eles.
 `http://localhost:8123/pedido/?emulador` abre a página de pedidos nos emuladores, e `tests/e2e-pedidos.mjs`
 testa o pedido do cliente até virar venda e entrega, além de conferir o que as regras bloqueiam.
-`tests/e2e-versao.mjs` (sem emuladores) confere que uma versão nova da página de pedidos chega a quem está com
+`tests/e2e-regras-antigas.mjs` (rodar com as regras da versão anterior) confere que o cadastro da página
+continua funcionando antes de o sítio publicar as regras novas. `tests/e2e-versao.mjs` (sem emuladores) confere que uma versão nova da página de pedidos chega a quem está com
 ela aberta: a página recarrega sozinha quando o cliente volta para ela, e o service worker do app não serve a
 página de pedidos guardada (ela busca sempre a versão publicada).

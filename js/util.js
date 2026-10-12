@@ -204,6 +204,23 @@ export function soDigitos(t) {
   return String(t ?? '').replace(/\D/g, '');
 }
 
+export function cpfValido(cpf) {
+  const n = soDigitos(cpf);
+  if (n.length !== 11 || /^(\d)\1+$/.test(n)) return false;
+  const digito = (ate) => {
+    let soma = 0;
+    for (let i = 0; i < ate; i++) soma += Number(n[i]) * (ate + 1 - i);
+    const resto = (soma * 10) % 11;
+    return resto === 10 ? 0 : resto;
+  };
+  return digito(9) === Number(n[9]) && digito(10) === Number(n[10]);
+}
+
+export function formatarCpf(cpf) {
+  const n = soDigitos(cpf);
+  return n.length === 11 ? `${n.slice(0, 3)}.${n.slice(3, 6)}.${n.slice(6, 9)}-${n.slice(9)}` : cpf || '';
+}
+
 // Link do WhatsApp. Números com DDD (10 ou 11 dígitos) ganham o 55 do Brasil.
 export function linkWhatsApp(telefone, mensagem = '') {
   let n = soDigitos(telefone);
@@ -214,6 +231,11 @@ export function linkWhatsApp(telefone, mensagem = '') {
 }
 
 // Link para abrir um endereço no mapa: Mapas da Apple no iPhone, Google Maps nos outros aparelhos.
+// iPhone ou iPad (para abrir o mapa da Apple).
+export function ehIOS() {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 export function linkMapa(endereco, ios = false) {
   const q = encodeURIComponent(endereco);
   return ios ? `https://maps.apple.com/?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`;

@@ -63,7 +63,8 @@ await page.click('text=Em 7 dias');
 await page.click('text=Entregar no endereço do cliente');
 await page.click('text=Registrar venda');
 await esperarTexto('Coloque o endereço para a entrega.');
-await page.getByLabel('Endereço (rua e número)').fill('Rua das Flores, 100');
+await page.getByLabel(/^Rua/).fill('Rua das Flores');
+await page.getByLabel(/^Número/).fill('100');
 await page.getByLabel('Bairro').fill('Centro');
 await page.getByLabel('Cidade').fill('Campinas');
 await foto('nova-venda');
@@ -103,7 +104,7 @@ const cliente = await page.evaluate(() => new Promise((ok) => {
     g.onsuccess = () => ok(g.result.find((x) => x.col === 'clientes').doc);
   };
 }));
-if (cliente.endereco !== 'Rua das Flores, 100' || cliente.bairro !== 'Centro' || cliente.cidade !== 'Campinas') erros.push('endereço não foi para o cadastro: ' + JSON.stringify(cliente));
+if (cliente.endereco !== 'Rua das Flores' || cliente.numero !== '100' || cliente.bairro !== 'Centro' || cliente.cidade !== 'Campinas') erros.push('endereço não foi para o cadastro: ' + JSON.stringify(cliente));
 
 passo('a receber e pagamento parcial');
 await page.goto(base + '/?local#/receber');

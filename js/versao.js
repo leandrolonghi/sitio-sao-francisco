@@ -1,2 +1,2 @@
 // Gerado por tools/release.mjs
-export const VERSAO = '2026.10.12-c0c58519';
+export const VERSAO = '2026.10.12-e196452c';

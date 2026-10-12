@@ -505,7 +505,7 @@ function VerProduto({ p, foto, fechada, onFechar }) {
   </${Folha}>`;
 }
 
-// Dias da semana em que o sítio entrega, se não for todo dia ("às quartas e aos sábados").
+// Dias da semana em que o sítio entrega (e o cliente retira), se não for todo dia ("às quartas e aos sábados").
 const diasRestritos = (info) => {
   const dias = diasDeEntrega(info);
   return dias.length && dias.length < 7 ? dias : null;
@@ -514,7 +514,7 @@ const diasRestritos = (info) => {
 // Faixa da tela inicial: frete grátis (promoção ou a partir de um valor), valor e dias da entrega.
 function AvisoEntrega({ info }) {
   const dias = diasRestritos(info);
-  const quando = dias ? html`<p>Entregamos ${textoDiasDeEntrega(dias)}.</p>` : '';
+  const quando = dias ? html`<p>Entregas e retiradas ${textoDiasDeEntrega(dias)}.</p>` : '';
   const aPartir = freteGratisAPartir(info);
   if (info.freteGratis) {
     return html`<div class="faixa ok"><${Icone} nome="gift" /><div class="faixa-corpo">
@@ -596,11 +596,11 @@ function nomeDoDia(d) {
   return DIAS_DA_SEMANA[paraData(d).getDay()];
 }
 
-// Datas em que o sítio entrega (os dias marcados no app); os outros dias não aparecem.
-function DatasDeEntrega({ dias, valor, onChange }) {
+// Datas em que o sítio entrega ou o cliente retira (os dias marcados no app); os outros dias não aparecem.
+function DatasDeEntrega({ dias, valor, onChange, retirar }) {
   const datas = proximasEntregas(dias, hoje());
   return html`<div class="campo">
-    <span class="campo-rotulo">Quando entregar?</span>
+    <span class="campo-rotulo">${retirar ? 'Quando vai retirar?' : 'Quando entregar?'}</span>
     <div class="datas-entrega" role="radiogroup">
       ${datas.map(
         (d) => html`<button type="button" role="radio" aria-checked=${valor === d} class=${valor === d ? 'ativo' : ''} onClick=${() => onChange(d)}>
@@ -608,7 +608,7 @@ function DatasDeEntrega({ dias, valor, onChange }) {
         </button>`,
       )}
     </div>
-    <span class="campo-dica">O sítio entrega ${textoDiasDeEntrega(dias)}.</span>
+    <span class="campo-dica">${retirar ? 'Dá para retirar' : 'O sítio entrega'} ${textoDiasDeEntrega(dias)}.</span>
   </div>`;
 }
 
@@ -651,8 +651,9 @@ function Finalizar() {
   const total = subtotal + taxa;
   const aPartir = freteGratisAPartir(info);
   const entregaGratis = entregar && !taxa && (info.taxaEntregaCent > 0 || info.freteGratis);
-  // dias de entrega marcados no app: o cliente escolhe uma dessas datas (a primeira já vem marcada)
-  const dias = entregar ? diasRestritos(info) : null;
+  // dias de entrega marcados no app (valem também para retirar): o cliente escolhe uma dessas datas
+  // (a primeira já vem marcada)
+  const dias = diasRestritos(info);
   const datas = dias ? proximasEntregas(dias, hoje()) : [];
   const quando = dias ? (datas.includes(dataEntrega) ? dataEntrega : datas[0] || '') : data;
 
@@ -738,7 +739,7 @@ function Finalizar() {
           <p class="campo-dica" style="margin:0">Este endereço fica salvo no seu cadastro.</p>`
       : ''}
     ${dias
-      ? html`<${DatasDeEntrega} dias=${dias} valor=${quando} onChange=${setDataEntrega} />`
+      ? html`<${DatasDeEntrega} dias=${dias} valor=${quando} onChange=${setDataEntrega} retirar=${!entregar} />`
       : html`<${CampoData} rotulo="Para quando?" valor=${data} onChange=${setData} dica="Deixe em branco para o quanto antes" erro=${erros.data} opcional />`}
     <${Segmentado} rotulo="Como vai pagar?" valor=${forma} onChange=${setForma} opcoes=${FORMAS_NA_PAGINA.map((f) => [f, f])} />
     ${erros.pagamento && !forma ? html`<p class="campo-dica erro" style="margin:-8px 0 0">${erros.pagamento}</p>` : ''}

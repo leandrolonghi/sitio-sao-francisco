@@ -79,7 +79,7 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
   de um valor dos itens (`freteGratisAcimaCent`, que não conta durante a promoção), dias de entrega
   (`diasEntrega`, 0 = domingo) e local de retirada (`retiradaEndereco`, `retiradaLat`, `retiradaLng`). A tela
   inicial da página avisa o frete grátis e os dias; ao finalizar, com dias marcados o cliente só escolhe uma das
-  próximas datas de entrega (retirando, a data é livre). Na venda, o valor da entrega vem preenchido (do pedido,
+  próximas datas desses dias, para entregar ou para retirar no local. Na venda, o valor da entrega vem preenchido (do pedido,
   ou o padrão) e dá para mudar.
 - A **foto do produto** é escolhida no cadastro do produto (câmera ou galeria) e o app a reduz (até 600 pixels,
   JPEG, uns 100 KB). Ela fica no próprio banco, na coleção `fotos` (um documento por produto), e não no Firebase

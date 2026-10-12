@@ -320,7 +320,7 @@ export function AjustesEntrega() {
       <${Interruptor} rotulo="Promoção: frete grátis" dica="Ligado, nenhuma entrega é cobrada e a página de pedidos avisa os clientes" valor=${promocao} onChange=${setPromocao} />
     </div>
     <${CampoDinheiro} rotulo="Frete grátis a partir de" valor=${aPartir} onChange=${setAPartir} dica="Pedidos a partir deste valor (sem contar a entrega) não pagam entrega, e a página avisa os clientes. Em branco, não tem. Durante a promoção não conta: já é tudo grátis." />
-    <${Campo} div rotulo="Dias de entrega" dica=${dias.length ? 'Na página, o cliente só escolhe estes dias para receber.' : 'Nenhum marcado: o cliente escolhe qualquer dia.'}>
+    <${Campo} div rotulo="Dias de entrega" dica=${dias.length ? 'Na página, o cliente só escolhe estes dias para receber ou retirar.' : 'Nenhum marcado: o cliente escolhe qualquer dia.'}>
       <div class="dias-semana" role="group">
         ${[1, 2, 3, 4, 5, 6, 0].map((d) => html`<button type="button" class=${dias.includes(d) ? 'ativo' : ''} aria-pressed=${dias.includes(d)} onClick=${() => alternarDia(d)}>${DIAS_DA_SEMANA[d].slice(0, 3)}</button>`)}
       </div>

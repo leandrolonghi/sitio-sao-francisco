@@ -4,13 +4,13 @@
 //  - DriverNuvem: Firebase Firestore, que também guarda uma cópia no aparelho e funciona sem internet
 import { novoId } from './util.js';
 
-export const COLECOES = ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo', 'cadastros'];
+export const COLECOES = ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo', 'cadastros', 'fotos'];
 
 // Ligadas à página de pedidos dos clientes. Precisam das regras novas do Firebase; enquanto elas não
 // forem publicadas, o app segue normal e só a tela de pedidos avisa.
-const COLECOES_DA_PAGINA = ['pedidos', 'catalogo', 'cadastros'];
+const COLECOES_DA_PAGINA = ['pedidos', 'catalogo', 'cadastros', 'fotos'];
 // Os clientes leem estas na página de pedidos: nada de e-mail de quem cadastrou.
-const SEM_AUTOR = ['catalogo', 'cadastros'];
+const SEM_AUTOR = ['catalogo', 'cadastros', 'fotos'];
 
 // Ao abrir o app na nuvem, pede de novo ao servidor tudo que mudou desde
 // (última alteração conhecida - 1 dia), para cobrir relógios um pouco errados.

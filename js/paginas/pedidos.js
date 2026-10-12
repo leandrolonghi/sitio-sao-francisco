@@ -23,11 +23,21 @@ export function salvarTaxaEntrega(taxa) {
   banco.salvar('catalogo', { tipo: 'loja', nome: nomeDoSitio(), ...infoLoja(), id: INFO_LOJA, taxaEntregaCent: valor });
 }
 
-// Coloca (ou tira) o produto da página de pedidos. Só vão para lá nome, unidade e preço.
+// Coloca (ou tira) o produto da página de pedidos. Só vão para lá nome, unidade, preço, descrição e a versão
+// da foto (a foto fica na coleção "fotos", que a página busca à parte).
 export function publicarNoCatalogo(p, apagado = false) {
   const mostrar = !apagado && p.naLoja && p.ativo !== false;
-  if (mostrar) banco.salvar('catalogo', { id: p.id, nome: p.nome, unidade: p.unidade, precoCent: p.precoCent ?? null, ativo: true });
-  else if (banco.get('catalogo', p.id)?.ativo) banco.salvar('catalogo', { id: p.id, ativo: false });
+  if (mostrar) {
+    banco.salvar('catalogo', {
+      id: p.id,
+      nome: p.nome,
+      unidade: p.unidade,
+      precoCent: p.precoCent ?? null,
+      descricao: p.descricao || null,
+      fotoEm: p.fotoEm || null,
+      ativo: true,
+    });
+  } else if (banco.get('catalogo', p.id)?.ativo) banco.salvar('catalogo', { id: p.id, ativo: false });
 }
 
 // Muda o pedido junto com a venda (confirmado quando vira venda, entregue quando a entrega é feita).

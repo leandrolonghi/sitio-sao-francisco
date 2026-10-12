@@ -113,7 +113,7 @@ async function aparelho(nome) {
     const tam = page.viewportSize();
     const altura = await page.evaluate(() => document.documentElement.scrollHeight);
     await page.setViewportSize({ width: tam.width, height: Math.max(tam.height, altura) });
-    await page.screenshot({ path: `${prints}/p${String(++n).padStart(2, '0')}-${nome}-${rot}.png` });
+    await page.screenshot({ path: `${prints}/p${String(++n).padStart(2, '0')}-${nome}-${rot}.png`, animations: 'disabled' });
     await page.setViewportSize(tam);
   };
   const esperar = (t, timeout = 10000) => page.getByText(t, { exact: false }).first().waitFor({ timeout });
@@ -153,6 +153,23 @@ await dono.page.getByLabel('Telefone / WhatsApp').fill('(11) 91111-2222');
 await dono.page.getByLabel('Observação').fill('cliente antigo');
 await dono.page.click('text=Salvar');
 await dono.esperar('cliente antigo');
+
+passo('dono coloca foto e descrição nos Ovos caipira');
+await dono.page.goto(base + '#/produtos');
+await dono.page.click('text=Ovos caipira');
+await dono.esperar('Colocar foto');
+await dono.page.locator('input[type=file]').setInputFiles(new URL('../icons/icon-512.png', import.meta.url).pathname);
+await dono.page.locator('img.foto-produto').waitFor();
+await dono.esperar('Trocar foto');
+await dono.page.getByLabel('Descrição').fill('Ovos de galinhas soltas.\nBandeja com 30.');
+await dono.foto('produto-com-foto');
+await dono.page.click('text=Salvar');
+await dono.esperar('Produto atualizado');
+await dono.page.waitForTimeout(1500);
+const [fotoOvos] = await docsDoServidor('fotos');
+const ovosNaPagina = (await docsDoServidor('catalogo')).find((d) => d.nome === 'Ovos caipira');
+conferir(fotoOvos?.foto?.startsWith('data:image/jpeg') && fotoOvos.foto.length < 160000 && !('criadoPor' in fotoOvos), 'foto no servidor: ' + (fotoOvos?.foto || '').slice(0, 40) + ' ' + fotoOvos?.foto?.length);
+conferir(ovosNaPagina?.fotoEm && ovosNaPagina.descricao?.startsWith('Ovos de galinhas soltas'), 'foto e descrição no catálogo: ' + JSON.stringify(ovosNaPagina));
 
 passo('dono coloca o valor da entrega nos Ajustes');
 await dono.page.goto(base + '#/ajustes');
@@ -224,6 +241,14 @@ passo('cliente vê só os produtos escolhidos');
 await cliente.esperar('Ovos caipira');
 await cliente.esperar('R$ 30,00 / ');
 await cliente.esperar('Retirando no sítio, não paga entrega');
+await cliente.page.locator('.loja-produto', { hasText: 'Ovos caipira' }).locator('.loja-foto img').waitFor();
+await cliente.esperar('Ovos de galinhas soltas.');
+conferir(!(await cliente.page.locator('.loja-produto', { hasText: 'Mel' }).locator('.loja-foto').count()), 'Mel aparece com foto sem ter');
+await cliente.page.click('[aria-label="Ver foto: Ovos caipira"]');
+await cliente.page.locator('.folha img.loja-foto-grande').waitFor();
+await cliente.page.locator('.folha', { hasText: 'Bandeja com 30.' }).waitFor();
+await cliente.foto('ver-produto');
+await cliente.page.click('.folha >> text=Pronto');
 conferir(!(await cliente.page.locator('text=Queijo').count()), 'cliente vê produto que não foi escolhido');
 const produto = (nome) => cliente.page.locator('.loja-produto', { hasText: nome });
 await produto('Ovos caipira').locator('text=Adicionar').click();
@@ -455,6 +480,8 @@ const umPedido = pedidosAna[0];
 const pedro = rest(await contaDeTeste('11911112222@cliente.demo-sitio.firebaseapp.com', 'sitio-4321', 'signInWithPassword'));
 const intruso = rest(await contaDeTeste('19988887777@cliente.outro-site.com', 'sitio-0000'));
 conferir((await anonimo.ler('catalogo')) === 200, 'catálogo deveria ser público');
+conferir((await anonimo.ler('fotos/' + ovosNaPagina.id)) === 200, 'foto do produto deveria ser pública');
+conferir((await anonimo.mudar('fotos/' + ovosNaPagina.id, { id: ovosNaPagina.id, foto: 'x' })) === 403, 'sem login conseguiu trocar a foto');
 for (const caminho of ['pedidos', 'pedidos/' + umPedido.id, 'cadastros', 'cadastros/19988887777', 'clientes', 'vendas', 'produtos', 'membros', 'ajustes/geral', 'clientes/tel19988887777']) {
   conferir((await anonimo.ler(caminho)) === 403, `sem login conseguiu ler ${caminho}`);
 }
@@ -469,6 +496,7 @@ conferir((await intruso.ler('pedidos/' + umPedido.id)) === 403, 'conta de outro 
 conferir((await intruso.ler('cadastros/19988887777')) === 403, 'conta de outro domínio leu o cadastro da Ana');
 conferir((await anonimo.mudar('catalogo/' + catalogo[0].id, { id: catalogo[0].id, nome: 'X', ativo: true })) === 403, 'sem login conseguiu mudar o catálogo');
 conferir((await pedro.mudar('catalogo/' + catalogo[0].id, { id: catalogo[0].id, nome: 'X', ativo: true })) === 403, 'cliente conseguiu mudar o catálogo');
+conferir((await pedro.mudar('fotos/' + ovosNaPagina.id, { id: ovosNaPagina.id, foto: 'x' })) === 403, 'cliente conseguiu trocar a foto');
 const agora = Date.now();
 const valido = { id: 'teste1', nome: 'Pedro Lima', telefone: '11911112222', entrega: 'retirar', endereco: null, dataDesejada: null, itens: [{ nome: 'Ovos', qtd: 1 }], totalCent: 0, obs: null, status: 'novo', criadoEm: agora, atualizadoEm: agora };
 conferir((await anonimo.criar('pedidos', 'teste1', valido)) === 403, 'pedido sem login aceito');

@@ -59,6 +59,7 @@ const ICONES = [
   'pencil', 'cloud', 'cloud-off', 'egg', 'sprout', 'x', 'message-circle', 'share', 'circle-alert',
   'download', 'upload', 'log-out', 'user-plus', 'wallet', 'calendar', 'boxes', 'tractor', 'refresh-cw',
   'circle-check', 'ban', 'square-plus', 'minus', 'map-pin', 'navigation', 'calendar-clock', 'circle-user-round',
+  'camera',
 ];
 const dirIcones = join(aqui, 'node_modules', 'lucide-static', 'icons');
 const mapa = {};

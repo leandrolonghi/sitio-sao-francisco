@@ -6,7 +6,7 @@ import { firebaseConfig } from '../config.js';
 import { conectar } from './firestore-rest.js';
 import { criarConta } from './loja-conta.js';
 import {
-  Tela, Secao, Botao, Texto, AreaTexto, CampoData, Segmentado, EntradaQtd, Etiqueta, Icone, Vazio, Avisos, CamposEndereco, CartaoEndereco,
+  Tela, Secao, Botao, Texto, AreaTexto, CampoData, Segmentado, EntradaQtd, Etiqueta, Icone, Vazio, Avisos, CamposEndereco, CartaoEndereco, Folha,
   avisar, useRota, trocar, confirmar,
 } from './ui.js';
 import { dinheiro, qtd, hoje, dataAmigavel, dataBR, formatarTelefone, novoId, linkWhatsApp, arred3, plural } from './util.js';
@@ -18,6 +18,7 @@ const CHAVE_SESSAO = 'sitio.loja.sessao';
 const CHAVE_CLIENTE = 'sitio.loja.cliente';
 const CHAVE_CARRINHO = 'sitio.loja.carrinho';
 const CHAVE_MEUS = 'sitio.loja.meus';
+const CHAVE_FOTOS = 'sitio.loja.fotos';
 
 function ler(chave, padrao) {
   try {
@@ -53,6 +54,7 @@ const loja = {
   info: {},
   erro: null,
   meus: ler(CHAVE_MEUS, null), // últimos pedidos vistos: { telefone, lista }, para aparecer na hora
+  fotos: ler(CHAVE_FOTOS, {}), // fotos dos produtos já baixadas: produtoId -> { em, url }
   atualizandoMeus: false,
   erroMeus: '',
 };
@@ -63,6 +65,7 @@ function mudar(patch) {
   if ('cliente' in patch) gravar(CHAVE_CLIENTE, loja.cliente);
   if ('carrinho' in patch) gravar(CHAVE_CARRINHO, loja.carrinho);
   if ('meus' in patch) gravar(CHAVE_MEUS, loja.meus);
+  if ('fotos' in patch) gravar(CHAVE_FOTOS, loja.fotos);
   ouvintes.forEach((f) => f());
 }
 function useLoja() {
@@ -116,9 +119,31 @@ async function carregarCatalogo() {
       .filter((d) => d.id !== INFO_LOJA && d.ativo && !d.excluido)
       .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));
     mudar({ produtos, info: docs.find((d) => d.id === INFO_LOJA) || {}, erro: null });
+    carregarFotos();
   } catch (e) {
     console.error(e);
     mudar({ produtos: loja.produtos || [], erro: e.code === 'unavailable' ? SEM_INTERNET : 'A página de pedidos ainda não está pronta. Fale com o sítio.' });
+  }
+}
+
+// Fotos dos produtos: o catálogo traz só a versão de cada foto (fotoEm); a foto vem da coleção "fotos" e fica
+// guardada no celular, para só baixar de novo quando o sítio trocar.
+async function carregarFotos() {
+  const comFoto = (loja.produtos || []).filter((p) => p.fotoEm);
+  const guardadas = Object.fromEntries(comFoto.filter((p) => loja.fotos[p.id]?.em === p.fotoEm).map((p) => [p.id, loja.fotos[p.id]]));
+  if (Object.keys(guardadas).length !== Object.keys(loja.fotos).length) mudar({ fotos: guardadas });
+  const faltam = comFoto.filter((p) => !guardadas[p.id]);
+  for (let i = 0; i < faltam.length; i += 10) {
+    const parte = faltam.slice(i, i + 10);
+    try {
+      const docs = await loja.db.lerVarios('fotos', parte.map((p) => p.id));
+      const novas = {};
+      for (const d of docs) if (d.foto) novas[d.id] = { em: parte.find((p) => p.id === d.id).fotoEm, url: d.foto };
+      mudar({ fotos: { ...loja.fotos, ...novas } });
+    } catch (e) {
+      console.error(e);
+      return;
+    }
   }
 }
 
@@ -415,12 +440,40 @@ function AvisoFechada() {
   </div></div>`;
 }
 
+const precoDoProduto = (p) => (p.precoCent != null ? `${dinheiro(p.precoCent)} / ${p.unidade}` : 'preço a combinar');
+const mudarQtd = (id, n) => mudar({ carrinho: { ...loja.carrinho, [id]: Math.max(0, arred3(n || 0)) } });
+
+// Botão Adicionar, ou − quantidade + quando o produto já está no pedido.
+function Quantidade({ p }) {
+  const n = loja.carrinho[p.id] || 0;
+  if (!n) return html`<button type="button" class="botao botao-leve loja-adicionar" onClick=${() => mudarQtd(p.id, 1)}><${Icone} nome="plus" tam=${18} /><span>Adicionar</span></button>`;
+  return html`<div class="passo">
+    <button type="button" aria-label=${'Menos ' + p.nome} onClick=${() => mudarQtd(p.id, n - 1)}><${Icone} nome="minus" tam=${18} /></button>
+    <span style="width:76px"><${EntradaQtd} valor=${n} unidade=${p.unidade} onChange=${(v) => mudarQtd(p.id, v)} /></span>
+    <button type="button" aria-label=${'Mais ' + p.nome} onClick=${() => mudarQtd(p.id, n + 1)}><${Icone} nome="plus" tam=${18} /></button>
+  </div>`;
+}
+
+// Foto grande e descrição inteira do produto.
+function VerProduto({ p, foto, fechada, onFechar }) {
+  useLoja();
+  return html`<${Folha} titulo=${p.nome} onFechar=${onFechar}>
+    ${foto ? html`<img class="loja-foto-grande" src=${foto} alt=${p.nome} />` : ''}
+    <p class="loja-preco">${precoDoProduto(p)}</p>
+    ${p.descricao ? html`<p class="loja-descricao-toda">${p.descricao}</p>` : ''}
+    <div class="loja-ver-acoes">
+      ${fechada ? '' : html`<${Quantidade} p=${p} />`}
+      <${Botao} tipo=${fechada ? 'secundario' : 'primario'} onClick=${onFechar}>${fechada ? 'Fechar' : 'Pronto'}</${Botao}>
+    </div>
+  </${Folha}>`;
+}
+
 function Catalogo() {
-  const { produtos, carrinho, cliente, info, erro } = useLoja();
+  const { produtos, cliente, info, erro, fotos } = useLoja();
   const itens = itensDoCarrinho();
   const total = totalItens(itens);
-  const mudarQtd = (id, n) => mudar({ carrinho: { ...carrinho, [id]: Math.max(0, arred3(n || 0)) } });
   const fechada = info.aberta === false;
+  const [vendo, setVendo] = useState(null);
 
   return html`<${Tela}
     titulo="Fazer pedido"
@@ -452,25 +505,24 @@ function Catalogo() {
         : html`<${Secao} titulo="O que você quer pedir?">
             <div class="lista">
               ${produtos.map((p) => {
-                const n = carrinho[p.id] || 0;
-                return html`<div class="linha loja-produto" key=${p.id}>
-                  <span class="linha-texto">
-                    <span class="linha-titulo">${p.nome}</span>
-                    <span class="linha-sub">${p.precoCent != null ? `${dinheiro(p.precoCent)} / ${p.unidade}` : 'preço a combinar'}</span>
-                  </span>
-                  ${fechada
-                    ? ''
-                    : n > 0
-                      ? html`<div class="passo">
-                          <button type="button" aria-label=${'Menos ' + p.nome} onClick=${() => mudarQtd(p.id, n - 1)}><${Icone} nome="minus" tam=${18} /></button>
-                          <span style="width:76px"><${EntradaQtd} valor=${n} unidade=${p.unidade} onChange=${(v) => mudarQtd(p.id, v)} /></span>
-                          <button type="button" aria-label=${'Mais ' + p.nome} onClick=${() => mudarQtd(p.id, n + 1)}><${Icone} nome="plus" tam=${18} /></button>
-                        </div>`
-                      : html`<button type="button" class="botao botao-leve loja-adicionar" onClick=${() => mudarQtd(p.id, 1)}><${Icone} nome="plus" tam=${18} /><span>Adicionar</span></button>`}
+                const foto = fotos[p.id]?.url;
+                const temMais = foto || p.descricao;
+                // com foto ou descrição, tocar no produto abre a foto grande e a descrição inteira
+                const texto = html`<span class=${'linha-texto' + (temMais ? ' loja-abre' : '')} onClick=${temMais ? () => setVendo(p) : undefined}>
+                  <span class="linha-titulo">${p.nome}</span>
+                  <span class="linha-sub">${precoDoProduto(p)}</span>
+                  ${p.descricao ? html`<span class="loja-descricao">${p.descricao}</span>` : ''}
+                </span>`;
+                const controles = fechada ? '' : html`<${Quantidade} p=${p} />`;
+                if (!foto) return html`<div class="linha loja-produto" key=${p.id}>${texto}${controles}</div>`;
+                return html`<div class="linha loja-produto com-foto" key=${p.id}>
+                  <button type="button" class="loja-foto" aria-label=${'Ver foto: ' + p.nome} onClick=${() => setVendo(p)}><img src=${foto} alt="" /></button>
+                  <div class="loja-produto-corpo">${texto}${controles ? html`<div class="loja-produto-acoes">${controles}</div>` : ''}</div>
                 </div>`;
               })}
             </div>
           </${Secao}>`}
+    ${vendo ? html`<${VerProduto} p=${vendo} foto=${fotos[vendo.id]?.url} fechada=${fechada} onFechar=${() => setVendo(null)} />` : ''}
   </${Tela}>`;
 }
 

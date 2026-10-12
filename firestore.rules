@@ -4,9 +4,9 @@ rules_version = '2';
 // Antes de publicar no Firebase, troque EMAIL_DO_RESPONSAVEL pelo e-mail de quem manda no app
 // e ID_DO_PROJETO pelo código do projeto no Firebase.
 // No app só entra quem confirmou o e-mail e foi liberado em "Pessoas com acesso" (ou é o responsável).
-// Na página de pedidos, qualquer um vê o catálogo; o cliente cadastrado (telefone e senha) vê e muda
-// só o próprio cadastro, faz pedidos, vê só os pedidos do próprio telefone e cancela os que o sítio ainda
-// não respondeu.
+// Na página de pedidos, qualquer um vê o catálogo (com as fotos dos produtos); o cliente cadastrado
+// (telefone e senha) vê e muda só o próprio cadastro, faz pedidos, vê só os pedidos do próprio telefone e
+// cancela os que o sítio ainda não respondeu.
 // O cadastro do cliente também aparece no app (Clientes), onde o sítio pode mudar nome e endereço.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -91,11 +91,15 @@ service cloud.firestore {
 
     match /{colecao}/{id} {
       allow read, write: if (responsavel() || membro())
-        && colecao in ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo', 'cadastros'];
+        && colecao in ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo', 'cadastros', 'fotos'];
     }
 
-    // Página de pedidos: produtos que o sítio escolheu mostrar.
+    // Página de pedidos: produtos que o sítio escolheu mostrar, e as fotos dos produtos.
     match /catalogo/{id} {
+      allow read: if true;
+    }
+
+    match /fotos/{id} {
       allow read: if true;
     }
 

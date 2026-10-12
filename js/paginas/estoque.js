@@ -1,13 +1,14 @@
 // Estoque, produção e cadastro de produtos.
-import { html, useState } from '../vendor/preact.js';
+import { html, useState, useRef } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { pode, app } from '../estado.js';
 import { publicarNoCatalogo } from './pedidos.js';
 import { TIPOS_MOVIMENTO, UNIDADES, qtdMovimento, estoqueBaixo } from '../calc.js';
-import { dinheiro, qtd, hoje, dataAmigavel, periodo, entre, arred3, contem } from '../util.js';
+import { dinheiro, qtd, hoje, dataAmigavel, periodo, entre, arred3, contem, novoId } from '../util.js';
+import { reduzirFoto } from '../foto.js';
 import {
   Tela, Secao, Lista, Linha, Etiqueta, Vazio, Botao, BotaoTopo, Icone, Texto, AreaTexto, CampoData, CampoDinheiro,
-  CampoQtd, Escolha, Seletor, Segmentado, Interruptor, Numero, avisar, trocar, voltar, confirmar,
+  CampoQtd, Escolha, Seletor, Segmentado, Interruptor, Numero, Campo, avisar, trocar, voltar, confirmar,
 } from '../ui.js';
 import { produtosAtivos, itensProdutos, estoqueAtual, NaoEncontrado } from './comum.js';
 
@@ -235,8 +236,41 @@ export function ListaProdutos() {
   </${Tela}>`;
 }
 
+// Foto do produto: tirar na hora ou escolher da galeria do celular.
+function CampoFoto({ foto, onChange }) {
+  const entrada = useRef();
+  const [lendo, setLendo] = useState(false);
+  const escolher = async (e) => {
+    const arquivo = e.target.files?.[0];
+    e.target.value = '';
+    if (!arquivo) return;
+    setLendo(true);
+    try {
+      onChange(await reduzirFoto(arquivo));
+    } catch (erro) {
+      console.error(erro);
+      avisar('Não consegui abrir essa foto. Tente outra.', 'erro');
+    } finally {
+      setLendo(false);
+    }
+  };
+  return html`<${Campo} rotulo="Foto" div dica="Aparece para os clientes na página de pedidos">
+    ${foto ? html`<img class="foto-produto" src=${foto} alt="Foto do produto" />` : ''}
+    <div class="botoes-foto">
+      <${Botao} tipo="secundario" icone="camera" onClick=${() => entrada.current?.click()} desativado=${lendo}>
+        ${lendo ? 'Preparando a foto…' : foto ? 'Trocar foto' : 'Colocar foto'}
+      </${Botao}>
+      ${foto ? html`<${Botao} tipo="secundario" icone="trash-2" onClick=${() => onChange(null)}>Tirar</${Botao}>` : ''}
+    </div>
+    <input ref=${entrada} type="file" accept="image/*" style="display:none" onChange=${escolher} aria-label="Escolher foto" />
+  </${Campo}>`;
+}
+
 export function FormProduto({ id }) {
   const existente = id ? banco.get('produtos', id) : null;
+  const fotoAntes = (existente && banco.get('fotos', existente.id)?.foto) || null;
+  const [foto, setFoto] = useState(fotoAntes);
+  const [descricao, setDescricao] = useState(existente?.descricao || '');
   const [nome, setNome] = useState(existente?.nome || '');
   const [unidade, setUnidade] = useState(existente?.unidade || 'un');
   const [precoCent, setPreco] = useState(existente?.precoCent ?? null);
@@ -250,9 +284,22 @@ export function FormProduto({ id }) {
 
   const salvar = () => {
     if (!nome.trim()) return setErro('Digite o nome do produto.');
+    const pid = existente?.id || novoId();
+    // a foto fica à parte; o produto guarda só quando ela mudou (para a página saber que precisa buscar de novo)
+    let fotoEm = existente?.fotoEm || null;
+    if (foto !== fotoAntes) {
+      if (foto) fotoEm = banco.salvar('fotos', { id: pid, foto }).atualizadoEm;
+      else {
+        banco.excluir('fotos', pid);
+        fotoEm = null;
+      }
+    }
     const doc = banco.salvar('produtos', {
       ...(existente || {}),
+      id: pid,
       nome: nome.trim(),
+      descricao: descricao.trim() || null,
+      fotoEm,
       unidade,
       precoCent: precoCent ?? null,
       controlaEstoque: controla,
@@ -270,6 +317,7 @@ export function FormProduto({ id }) {
   const apagar = () => {
     if (!confirmar(`Apagar ${existente.nome}? As vendas antigas continuam com o nome. Se só parou de vender, prefira desligar "Ativo".`)) return;
     banco.excluir('produtos', existente.id);
+    if (banco.get('fotos', existente.id)) banco.excluir('fotos', existente.id);
     publicarNoCatalogo(existente, true);
     avisar('Produto apagado');
     trocar('/produtos');
@@ -287,6 +335,8 @@ export function FormProduto({ id }) {
       <${Escolha} rotulo="Vende por" valor=${unidade} onChange=${setUnidade} opcoes=${unidades.map(([u, n]) => [u, `${n} (${u})`])} />
       <${CampoDinheiro} rotulo="Preço" valor=${precoCent} onChange=${setPreco} dica="Pode mudar na hora da venda" />
     </div>
+    <${CampoFoto} foto=${foto} onChange=${setFoto} />
+    <${AreaTexto} rotulo="Descrição" valor=${descricao} onChange=${setDescricao} placeholder="Opcional. Ex.: ovos de galinhas soltas, bandeja com 30" />
     <div class="cartao">
       <${Interruptor} rotulo="Controlar estoque" dica="Soma a produção e desconta as vendas" valor=${controla} onChange=${setControla} />
       ${controla

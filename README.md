@@ -9,6 +9,7 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 - **Página de pedidos** para os clientes: o cliente faz um cadastro e entra com telefone e senha, escolhe os
   produtos e acompanha o pedido; no app o pedido vira venda (e entrega) com um toque. O cadastro do cliente é o
   mesmo na página e em Clientes no app
+- **Foto e descrição dos produtos** (no cadastro do produto): aparecem para os clientes na página de pedidos
 - **Valor da entrega** (em Ajustes): cobrado no pedido da página e na venda (dá para mudar em cada venda)
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
 - **Estoque e produção**: produção do dia, entradas, perdas, consumo e acerto de contagem; as vendas descontam sozinhas
@@ -64,15 +65,19 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
   login do cliente). Apagar o cliente no app apaga também o cadastro da página; na próxima vez, a pessoa preenche
   de novo. Isso fica em `js/cadastros.js`.
 - Os produtos que aparecem são escolhidos em **Pedidos dos clientes → Produtos e ajustes da página** (ou no
-  cadastro do produto). Só vão para a página nome, unidade e preço. Lá também dá para fechar a página, colocar
+  cadastro do produto). Só vão para a página nome, unidade, preço, descrição e foto. Lá também dá para fechar a página, colocar
   o WhatsApp do sítio. O **valor da entrega** fica em **Ajustes** (e também aparece ali): a página mostra o valor
   ao escolher os produtos e soma no pedido quando o cliente escolhe Entregar. Na venda, o valor da entrega vem
   preenchido (do pedido, ou o dos Ajustes) e dá para mudar.
+- A **foto do produto** é escolhida no cadastro do produto (câmera ou galeria) e o app a reduz (até 600 pixels,
+  JPEG, uns 100 KB). Ela fica no próprio banco, na coleção `fotos` (um documento por produto), e não no Firebase
+  Storage, que em projetos novos só funciona no plano pago. A página guarda as fotos no celular do cliente e só
+  baixa de novo quando a foto muda (`fotoEm` no catálogo). Isso fica em `js/foto.js`.
 - O pedido chega no app como **novo**; **Transformar em venda** abre a venda já preenchida e, ao registrar,
   o cliente vê **Confirmado**. Quando a entrega é marcada como feita, o cliente vê **Entregue**.
 - Enquanto o sítio não responde, o cliente pode **cancelar o pedido** em Meus pedidos; no app ele sai dos
   pedidos novos e aparece como **Cancelado**. Depois de confirmado ou recusado, só o sítio muda.
-- As regras do banco deixam quem não tem login só ver o catálogo. O cliente logado vê e muda só o próprio
+- As regras do banco deixam quem não tem login só ver o catálogo e as fotos. O cliente logado vê e muda só o próprio
   cadastro, faz pedidos no próprio telefone (conferidos campo a campo) e vê só os pedidos dele. Quem usa o app
   lê e muda os cadastros.
 
@@ -90,6 +95,7 @@ pedido/index.html, js/loja.js             página de pedidos dos clientes (js/lo
 js/firestore-rest.js                      Firestore pela API REST, usado só pela página de pedidos (leve e rápido)
 js/loja-conta.js                          login dos clientes da página (Firebase Authentication pela API REST)
 js/cadastros.js                           cadastro da página de pedidos ligado ao cliente do app
+js/foto.js                                foto do produto reduzida para guardar no banco
 js/db.js                                  dados em memória + gravação local (IndexedDB) ou na nuvem (Firestore)
 js/calc.js                                regras: totais, fiado, estoque, relatórios
 js/util.js                                dinheiro, números e datas no padrão brasileiro

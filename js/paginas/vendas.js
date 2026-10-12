@@ -120,9 +120,9 @@ export function FormVenda({ id, query = {} }) {
   const [descontoCent, setDesconto] = useState(existente?.descontoCent || null);
   const [verDesconto, setVerDesconto] = useState(!!existente?.descontoCent);
   const [comoPaga, setComoPaga] = useState('agora');
-  const [forma, setForma] = useState(ultimaForma());
+  const [forma, setForma] = useState(FORMAS_PAGAMENTO.includes(doPedido?.forma) ? doPedido.forma : ultimaForma());
   const [recebidoCent, setRecebido] = useState(null);
-  const [obs, setObs] = useState(existente?.obs || pedido?.obs || '');
+  const [obs, setObs] = useState(existente?.obs || doPedido?.obs || '');
   const [vencimento, setVencimento] = useState(existente?.vencimento || '');
   const [entregar, setEntregar] = useState(existente ? !!existente.entrega : pedido?.entrega === 'entregar');
   const [dataEntrega, setDataEntrega] = useState(existente?.entrega?.data || existente?.data || (pedido?.dataDesejada > hoje() ? pedido.dataDesejada : hoje()));

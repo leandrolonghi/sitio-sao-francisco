@@ -12,7 +12,7 @@ import { ListaEstoque, LancarMovimento, EstoqueProduto, ListaProdutos, FormProdu
 import { Relatorios } from './paginas/relatorios.js';
 import { Ajustes, Acesso, AcessoPessoa } from './paginas/ajustes.js';
 import { Entregas } from './paginas/entregas.js';
-import { Pedidos, AjustesPagina, pedidosNovos } from './paginas/pedidos.js';
+import { Pedidos, AjustesPagina, pedidosNovos, acompanharPixDaPagina } from './paginas/pedidos.js';
 import { entregasPendentes } from './calc.js';
 import { acompanharCadastros } from './cadastros.js';
 import { NaoEncontrado, SemPermissao } from './paginas/comum.js';
@@ -255,6 +255,7 @@ async function iniciar() {
   const nuvem = await iniciarNuvem(nuvemCfg.config, { emulador: nuvemCfg.emulador });
   mudar({ modo: 'nuvem', nuvem });
   acompanharCadastros(); // quem se cadastra na página de pedidos aparece em Clientes
+  acompanharPixDaPagina(); // chave Pix dos Ajustes vai para a página de pedidos
   render(comAvisos(html`<${RaizNuvem} nuvem=${nuvem} />`), raiz);
 }
 

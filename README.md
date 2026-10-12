@@ -10,6 +10,8 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
   produtos e acompanha o pedido; no app o pedido vira venda (e entrega) com um toque. O cadastro do cliente é o
   mesmo na página e em Clientes no app
 - **Foto e descrição dos produtos** (no cadastro do produto): aparecem para os clientes na página de pedidos
+- **Pix no pedido**: o cliente escolhe como vai pagar (Pix, dinheiro ou cartão); no Pix, copia o código
+  "Pix Copia e Cola" com o valor do pedido e cola no app do banco. A chave fica em Ajustes
 - **Valor da entrega** (em Ajustes): cobrado no pedido da página e na venda (dá para mudar em cada venda)
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
 - **Estoque e produção**: produção do dia, entradas, perdas, consumo e acerto de contagem; as vendas descontam sozinhas
@@ -73,6 +75,13 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
   JPEG, uns 100 KB). Ela fica no próprio banco, na coleção `fotos` (um documento por produto), e não no Firebase
   Storage, que em projetos novos só funciona no plano pago. A página guarda as fotos no celular do cliente e só
   baixa de novo quando a foto muda (`fotoEm` no catálogo). Isso fica em `js/foto.js`.
+- O cliente escolhe **como vai pagar** (Pix, Dinheiro ou Cartão). A forma vai na primeira linha da observação
+  do pedido ("Pagamento: Pix"), um campo que as regras já aceitam; o app mostra essa linha à parte e a usa
+  para preencher a forma de pagamento da venda. No Pix, a página monta o código **Pix Copia e Cola** (BR Code
+  estático do Banco Central, com o valor do pedido quando todos os itens têm preço) a partir da chave Pix dos
+  **Ajustes**, que o app leva para o documento `_loja` do catálogo já entendida (tipo e chave, `js/pix.js`).
+  Uma página da internet não consegue abrir o app do banco de qualquer pessoa: o cliente copia o código e
+  cola em Pix › Pix Copia e Cola no banco, que mostra quem recebe e o valor.
 - O pedido chega no app como **novo**; **Transformar em venda** abre a venda já preenchida e, ao registrar,
   o cliente vê **Confirmado**. Quando a entrega é marcada como feita, o cliente vê **Entregue**.
 - Enquanto o sítio não responde, o cliente pode **cancelar o pedido** em Meus pedidos; no app ele sai dos
@@ -96,6 +105,7 @@ js/firestore-rest.js                      Firestore pela API REST, usado só pel
 js/loja-conta.js                          login dos clientes da página (Firebase Authentication pela API REST)
 js/cadastros.js                           cadastro da página de pedidos ligado ao cliente do app
 js/foto.js                                foto do produto reduzida para guardar no banco
+js/pix.js                                 chave Pix e código Pix Copia e Cola da página de pedidos
 js/db.js                                  dados em memória + gravação local (IndexedDB) ou na nuvem (Firestore)
 js/calc.js                                regras: totais, fiado, estoque, relatórios
 js/util.js                                dinheiro, números e datas no padrão brasileiro

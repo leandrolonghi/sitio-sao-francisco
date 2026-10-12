@@ -3,6 +3,7 @@
 // e ID_DO_PROJETO = demo-sitio).
 // Uso: node tests/e2e-pedidos.mjs http://localhost:8123 pasta-para-prints
 import { createRequire } from 'node:module';
+import { crc16 } from '../js/pix.js';
 const require = createRequire(import.meta.url + '/../../tools/');
 const { chromium, devices } = require('playwright');
 
@@ -171,12 +172,19 @@ const ovosNaPagina = (await docsDoServidor('catalogo')).find((d) => d.nome === '
 conferir(fotoOvos?.foto?.startsWith('data:image/jpeg') && fotoOvos.foto.length < 160000 && !('criadoPor' in fotoOvos), 'foto no servidor: ' + (fotoOvos?.foto || '').slice(0, 40) + ' ' + fotoOvos?.foto?.length);
 conferir(ovosNaPagina?.fotoEm && ovosNaPagina.descricao?.startsWith('Ovos de galinhas soltas'), 'foto e descrição no catálogo: ' + JSON.stringify(ovosNaPagina));
 
-passo('dono coloca o valor da entrega nos Ajustes');
+passo('dono coloca o valor da entrega e a chave Pix nos Ajustes');
 await dono.page.goto(base + '#/ajustes');
 await dono.page.getByLabel('Valor da entrega').fill('5');
+await dono.page.getByLabel('Chave Pix').fill('65 9998');
+await dono.esperar('Não reconheci essa chave');
+await dono.page.getByLabel('Chave Pix').fill('(65) 99984-9257');
+await dono.esperar('Os clientes pagam para: Celular (65) 99984-9257');
 await dono.foto('ajustes-entrega');
 await dono.page.click('text=Salvar ajustes');
 await dono.esperar('Ajustes salvos');
+await dono.page.waitForTimeout(1500);
+const lojaComPix = (await docsDoServidor('catalogo')).find((d) => d.id === '_loja');
+conferir(lojaComPix?.pixChave === '+5565999849257' && lojaComPix.pixTipo === 'celular', 'chave Pix na página: ' + JSON.stringify(lojaComPix));
 
 passo('dono abre Pedidos, coloca o Mel na página e o WhatsApp do sítio');
 await dono.page.goto(base + '#/mais');
@@ -264,15 +272,37 @@ await cliente.esperar('Entregar (R$ 5,00)');
 await cliente.esperar('R$ 37,00');
 conferir(!(await cliente.page.getByLabel('Bairro').count()), 'pediu o endereço de novo em vez de usar o do cadastro');
 await cliente.page.getByLabel('Observação').fill('Deixar no portão');
+await cliente.page.click('text=Enviar pedido');
+await cliente.esperar('Escolha como vai pagar.');
+conferir(!(await cliente.page.locator('text=Pedido enviado!').count()), 'enviou sem a forma de pagamento');
+
+passo('cliente escolhe Pix e copia o código com o valor do pedido');
+await cliente.ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
+await cliente.page.getByRole('radio', { name: 'Pix' }).click();
+await cliente.esperar('Pagar com Pix: R$ 37,00');
+await cliente.esperar('Chave: Celular (65) 99984-9257');
+await cliente.page.click('text=Copiar código Pix');
+await cliente.esperar('Código Pix copiado');
+await cliente.esperar('Copiado!');
+const codigo = await cliente.page.evaluate(() => navigator.clipboard.readText());
+conferir(
+  codigo.startsWith('000201') && codigo.includes('0014br.gov.bcb.pix0114+5565999849257') && codigo.includes('540537.00') && codigo.slice(-4) === crc16(codigo.slice(0, -4)),
+  'código Pix copiado: ' + codigo,
+);
+await cliente.page.click('text=Prefiro copiar só a chave');
+await cliente.esperar('Chave Pix copiada');
+conferir((await cliente.page.evaluate(() => navigator.clipboard.readText())) === '65999849257', 'chave Pix copiada');
 await cliente.foto('finalizar');
 await cliente.page.click('text=Enviar pedido');
 await cliente.esperar('Pedido enviado!');
 await cliente.esperar('Avisar o sítio no WhatsApp');
+await cliente.esperar('Pagar com Pix: R$ 37,00');
 const zap = await cliente.page.locator('a:has-text("Avisar o sítio no WhatsApp")').getAttribute('href');
-conferir(zap.includes('5519977776666') && decodeURIComponent(zap).includes('Rua das Flores'), 'link do WhatsApp para o sítio: ' + zap);
+conferir(zap.includes('5519977776666') && decodeURIComponent(zap).includes('Rua das Flores') && decodeURIComponent(zap).includes('Pagamento: Pix'), 'link do WhatsApp para o sítio: ' + zap);
 await cliente.foto('enviado');
 await cliente.page.click('text=Ver meus pedidos');
 await cliente.esperar('Recebido');
+await cliente.esperar('Copiar código Pix (R$ 37,00)');
 await cliente.foto('meus-recebido');
 
 passo('pedido chega no app do dono na hora');
@@ -287,6 +317,8 @@ await dono.esperar('Rua das Flores, 10, Centro, Campinas');
 await dono.esperar('Deixar no portão');
 await dono.esperar('Ponto de referência: Portão verde');
 await dono.esperar('Total estimado: R$ 37,00');
+await dono.esperar('Pagamento: Pix');
+conferir(!(await dono.page.locator('.cartao.pedido p.suave', { hasText: 'Pagamento:' }).count()), 'forma de pagamento repetida na observação do pedido');
 await dono.foto('pedido-novo');
 
 passo('dono transforma o pedido em venda');
@@ -297,6 +329,9 @@ conferir((await dono.page.locator('.seletor-botao').first().innerText()).include
 await dono.esperar('Rua das Flores, 10, Centro, Campinas');
 conferir((await dono.page.getByLabel('Valor da entrega').inputValue()) === '5,00', 'valor da entrega não veio do pedido');
 await dono.esperar('R$ 37,00');
+conferir((await dono.page.getByLabel('Forma').inputValue()) === 'Pix', 'forma de pagamento não veio do pedido');
+const obsDaVenda = await dono.page.getByLabel('Observação').inputValue();
+conferir(obsDaVenda.includes('Deixar no portão') && !obsDaVenda.includes('Pagamento'), 'observação da venda: ' + obsDaVenda);
 await dono.foto('venda-do-pedido');
 await dono.page.click('text=Registrar venda');
 await dono.esperar('Pedido confirmado e venda registrada');
@@ -342,8 +377,11 @@ await cliente.page.click('.abas >> text=Fazer pedido');
 await produto('Mel').locator('text=Adicionar').click();
 await cliente.page.click('text=Continuar');
 await cliente.page.click('text=Retirar no sítio');
+await cliente.page.getByRole('radio', { name: 'Dinheiro' }).click();
+conferir(!(await cliente.page.locator('text=Pagar com Pix').count()), 'mostra o Pix pagando em dinheiro');
 await cliente.page.click('text=Enviar pedido');
 await cliente.esperar('Pedido enviado!');
+conferir(!(await cliente.page.locator('text=Pagar com Pix').count()), 'mostra o Pix depois de pedir pagando em dinheiro');
 await dono.page.goto(base + '#/pedidos');
 await dono.esperar('Vai retirar no sítio', 15000);
 await dono.page.click('text=Recusar');
@@ -361,12 +399,15 @@ await produto('Mel').locator('text=Adicionar').click();
 await cliente.page.click('[aria-label="Mais Mel"]');
 await cliente.page.click('text=Continuar');
 await cliente.page.click('text=Retirar no sítio');
+await cliente.page.getByRole('radio', { name: 'Cartão' }).click();
 await cliente.page.click('text=Enviar pedido');
 await cliente.esperar('Pedido enviado!');
 await dono.page.goto(base + '#/pedidos');
 await dono.esperar('2 un Mel', 15000);
+await dono.esperar('Pagamento: Cartão');
 await dono.page.click('text=Transformar em venda');
 await dono.esperar('Venda do pedido');
+conferir((await dono.page.getByLabel('Forma').inputValue()) === 'Cartão', 'forma de pagamento (cartão) não veio do pedido');
 await cliente.page.click('text=Ver meus pedidos');
 await cliente.esperar('Cancelar pedido');
 await cliente.foto('meus-com-cancelar');
@@ -438,6 +479,7 @@ await cliente2.esperar('Portão azul');
 await cliente2.foto('endereco-pronto');
 await cliente2.page.click('text=Mudar endereço');
 await cliente2.page.getByLabel('Bairro').fill('Jardim Novo');
+await cliente2.page.getByRole('radio', { name: 'Dinheiro' }).click();
 await cliente2.page.click('text=Enviar pedido');
 await cliente2.esperar('Pedido enviado!');
 await cliente2.page.waitForTimeout(1000);

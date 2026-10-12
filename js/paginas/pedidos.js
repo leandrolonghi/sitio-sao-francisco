@@ -3,7 +3,8 @@ import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { dinheiro, qtd, hoje, addDias, dataAmigavel, dataBR, formatarTelefone, linkWhatsApp, plural, ordenarPorNome } from '../util.js';
 import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, Interruptor, Texto, CampoDinheiro, avisar, confirmar, ir } from '../ui.js';
-import { INFO_LOJA, STATUS_PEDIDO } from '../loja-comum.js';
+import { INFO_LOJA, STATUS_PEDIDO, separarPagamento } from '../loja-comum.js';
+import { lerChavePix } from '../pix.js';
 import { clienteDoPedido } from '../cadastros.js';
 import { nomeDoSitio } from './comum.js';
 
@@ -21,6 +22,26 @@ export function salvarTaxaEntrega(taxa) {
   const valor = taxa > 0 ? taxa : null;
   if ((infoLoja().taxaEntregaCent || null) === valor) return;
   banco.salvar('catalogo', { tipo: 'loja', nome: nomeDoSitio(), ...infoLoja(), id: INFO_LOJA, taxaEntregaCent: valor });
+}
+
+// Chave Pix do sítio na página de pedidos (os clientes copiam o código Pix com o valor do pedido). A chave fica
+// nos Ajustes (também vai na mensagem de cobrança); aqui vai já entendida: tipo e chave no formato do Pix.
+export function salvarPixDaPagina(texto) {
+  const pix = lerChavePix(texto);
+  const info = infoLoja();
+  if ((info.pixChave || null) === (pix?.chave || null) && (info.pixTipo || null) === (pix?.tipo || null)) return;
+  banco.salvar('catalogo', { tipo: 'loja', nome: nomeDoSitio(), ...info, id: INFO_LOJA, pixChave: pix?.chave || null, pixTipo: pix?.tipo || null });
+}
+
+// Chave Pix posta nos Ajustes antes de a página ter Pix: leva para a página quando os dados chegam do servidor.
+export function acompanharPixDaPagina() {
+  let relogio = null;
+  return banco.ouvir(() => {
+    clearTimeout(relogio);
+    relogio = setTimeout(() => {
+      if (banco.prontas.has('ajustes') && banco.prontas.has('catalogo')) salvarPixDaPagina(banco.ajustes().chavePix);
+    }, 1500);
+  });
 }
 
 // Coloca (ou tira) o produto da página de pedidos. Só vão para lá nome, unidade, preço, descrição e a versão
@@ -61,6 +82,7 @@ function ItensPedido({ p }) {
 }
 
 function CartaoPedido({ p }) {
+  const { forma, obs } = separarPagamento(p.obs);
   const virarVenda = () => ir(`/vendas/nova?pedido=${p.id}&cliente=${clienteDoPedido(p)}`);
   const recusar = () => {
     if (!confirmar(`Recusar o pedido de ${p.nome}? Ele vai aparecer como "não aceito" para o cliente.`)) return;
@@ -79,7 +101,8 @@ function CartaoPedido({ p }) {
       <${Icone} nome=${p.entrega === 'entregar' ? 'truck' : 'house'} tam=${18} />
       <span>${p.entrega === 'entregar' ? 'Entregar' + (p.endereco ? ': ' + p.endereco : '') : 'Vai retirar no sítio'}${p.dataDesejada ? ` · para ${dataBR(p.dataDesejada)}` : ''}</span>
     </p>
-    ${p.obs ? html`<p class="suave" style="white-space:pre-line">“${p.obs}”</p>` : ''}
+    ${forma ? html`<p class="entrega-endereco"><${Icone} nome="wallet" tam=${18} /><span>Pagamento: ${forma}</span></p>` : ''}
+    ${obs ? html`<p class="suave" style="white-space:pre-line">“${obs}”</p>` : ''}
     <div class="botoes">
       <${Botao} icone="shopping-cart" onClick=${virarVenda}>Transformar em venda</${Botao}>
       <${Botao} tipo="secundario" icone="message-circle" href=${linkWhatsApp(p.telefone)}>Conversar no WhatsApp</${Botao}>
@@ -205,8 +228,11 @@ export function AjustesPagina() {
 export function dadosDoPedido(id) {
   const p = id && banco.get('pedidos', id);
   if (!p) return null;
+  const { forma, obs } = separarPagamento(p.obs);
   return {
     pedido: p,
+    forma,
+    obs,
     itens: (p.itens || []).map((i) => ({
       produtoId: banco.get('produtos', i.produtoId) ? i.produtoId : null,
       nome: i.nome,

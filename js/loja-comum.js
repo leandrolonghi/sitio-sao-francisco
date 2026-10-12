@@ -48,3 +48,18 @@ export const mesmoEndereco = (a, b) => CAMPOS_ENDERECO.every((k) => (a?.[k] || '
 
 // Texto sem espaços sobrando (ou null, se ficou vazio).
 export const textoOuNulo = (t) => (t || '').trim().replace(/\s+/g, ' ') || null;
+
+// Como o cliente vai pagar. Vai como a primeira linha da observação do pedido ("Pagamento: Pix"), um campo que
+// as regras do banco já aceitam; o app separa essa linha para mostrar e para preencher a venda.
+export const FORMAS_NA_PAGINA = ['Pix', 'Dinheiro', 'Cartão'];
+const LINHA_PAGAMENTO = /^Pagamento: (.+)$/m;
+export const linhaPagamento = (forma) => `Pagamento: ${forma}`;
+export function separarPagamento(obs) {
+  const texto = obs || '';
+  const forma = texto.match(LINHA_PAGAMENTO)?.[1].trim() || null;
+  const resto = texto.replace(LINHA_PAGAMENTO, '').replace(/^\n+|\n+$/g, '').replace(/\n{2,}/g, '\n');
+  return { forma, obs: resto || null };
+}
+
+// Valor para o código Pix: o total do pedido, se todos os itens têm preço (senão o cliente digita no banco).
+export const valorParaPix = (p) => ((p.itens || []).every((i) => i.precoCent != null) && p.totalCent > 0 ? p.totalCent : null);

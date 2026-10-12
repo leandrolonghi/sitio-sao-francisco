@@ -10,7 +10,11 @@ import {
   avisar, useRota, trocar, confirmar,
 } from './ui.js';
 import { dinheiro, qtd, hoje, dataAmigavel, dataBR, formatarTelefone, novoId, linkWhatsApp, arred3, plural } from './util.js';
-import { INFO_LOJA, STATUS_PEDIDO, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco, textoOuNulo } from './loja-comum.js';
+import {
+  INFO_LOJA, STATUS_PEDIDO, FORMAS_NA_PAGINA, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco, textoOuNulo,
+  linhaPagamento, separarPagamento, valorParaPix,
+} from './loja-comum.js';
+import { codigoPix, descreverChave, chaveParaColar } from './pix.js';
 import { VERSAO } from './versao.js';
 
 // ---------- Estado da página ----------
@@ -536,6 +540,7 @@ function Finalizar() {
   const [mudandoEndereco, setMudandoEndereco] = useState(!enderecoCompleto(cliente));
   const [data, setData] = useState('');
   const [obs, setObs] = useState('');
+  const [forma, setForma] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [erros, setErros] = useState({});
   // carrinho vazio (ex.: abriu este endereço direto): volta para os produtos
@@ -557,6 +562,7 @@ function Finalizar() {
       setMudandoEndereco(true);
     }
     if (data && data < hoje()) er.data = 'Escolha hoje ou um dia que ainda vai chegar.';
+    if (!forma) er.pagamento = 'Escolha como vai pagar.';
     setErros(er);
     if (Object.keys(er).length) return avisar(Object.values(er)[0], 'erro');
     if (info.aberta === false) return avisar('O sítio não está recebendo pedidos agora.', 'erro');
@@ -573,7 +579,7 @@ function Finalizar() {
       itens,
       entregaCent: taxa || undefined,
       totalCent: total,
-      obs: [obs.trim(), referencia].filter(Boolean).join('\n') || null,
+      obs: [linhaPagamento(forma), obs.trim(), referencia].filter(Boolean).join('\n'),
       status: 'novo',
       criadoEm: agora,
       atualizadoEm: agora,
@@ -621,10 +627,70 @@ function Finalizar() {
       ? html`<${CamposEndereco} dados=${end.dados} mudarCampo=${end.mudarCampo} erros=${end.erros} />
           <p class="campo-dica" style="margin:0">Este endereço fica salvo no seu cadastro.</p>`
       : ''}
+    <${Segmentado} rotulo="Como vai pagar?" valor=${forma} onChange=${setForma} opcoes=${FORMAS_NA_PAGINA.map((f) => [f, f])} />
+    ${erros.pagamento && !forma ? html`<p class="campo-dica erro" style="margin:-8px 0 0">${erros.pagamento}</p>` : ''}
+    ${forma === 'Pix' ? html`<${PagarComPix} valorCent=${semPreco ? null : total} />` : ''}
     <${CampoData} rotulo="Para quando?" valor=${data} onChange=${setData} dica="Deixe em branco para o quanto antes" erro=${erros.data} opcional />
     <${AreaTexto} rotulo="Observação" valor=${obs} onChange=${setObs} placeholder="Opcional. Ex.: ovos grandes, entregar depois das 17h" />
     <p class="suave pequeno" style="margin:0">Pedido em nome de <strong>${cliente.nome}</strong>, ${formatarTelefone(cliente.telefone)}.</p>
   </${Tela}>`;
+}
+
+async function copiarTexto(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+    return true;
+  } catch {
+    // sem acesso à área de transferência: copia do jeito antigo
+    const campo = document.createElement('textarea');
+    campo.value = texto;
+    campo.setAttribute('readonly', '');
+    campo.style.cssText = 'position:fixed;top:0;opacity:0';
+    document.body.appendChild(campo);
+    campo.select();
+    campo.setSelectionRange(0, texto.length);
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    campo.remove();
+    return ok;
+  }
+}
+
+// Pagar com Pix: copia o código "Pix Copia e Cola" com o valor do pedido (a chave fica nos Ajustes do app).
+// A página não consegue abrir o app do banco; o cliente abre e cola o código em Pix Copia e Cola.
+function PagarComPix({ valorCent, compacto }) {
+  const { info } = useLoja();
+  const [copiado, setCopiado] = useState(false);
+  const [codigoVisivel, setCodigoVisivel] = useState(false);
+  if (!info.pixChave) return compacto ? '' : html`<p class="campo-dica" style="margin:0">O sítio passa a chave Pix quando confirmar o pedido.</p>`;
+  const chave = { tipo: info.pixTipo, chave: info.pixChave };
+  const codigo = codigoPix({ chave: chave.chave, nome: info.nome, valorCent });
+  const copiar = async (texto, aviso) => {
+    if (!(await copiarTexto(texto))) {
+      setCodigoVisivel(true);
+      return avisar('Não consegui copiar. Toque no código abaixo e copie.', 'erro');
+    }
+    setCopiado(true);
+    avisar(aviso);
+  };
+  const passo = html`Abra o app do seu banco, entre em <strong>Pix › Pix Copia e Cola</strong> e cole o código.`;
+  if (compacto) {
+    return html`<${Botao} tipo="secundario" icone="copy" onClick=${() => copiar(codigo, 'Código Pix copiado')}>Copiar código Pix${valorCent ? ' (' + dinheiro(valorCent) + ')' : ''}</${Botao}>
+      ${copiado ? html`<p class="campo-dica">${passo}</p>` : ''}
+      ${codigoVisivel ? html`<textarea class="pix-codigo" readonly rows="4" value=${codigo} onFocus=${(e) => e.target.select()}></textarea>` : ''}`;
+  }
+  return html`<div class="cartao pix">
+    <div class="pix-topo"><${Icone} nome="qr-code" /><strong>Pagar com Pix${valorCent ? ': ' + dinheiro(valorCent) : ''}</strong></div>
+    <p class="suave">Chave: ${descreverChave(chave)}</p>
+    <${Botao} classe="cheio" icone="copy" onClick=${() => copiar(codigo, 'Código Pix copiado')}>${copiado ? 'Copiar de novo' : 'Copiar código Pix'}</${Botao}>
+    <p class="campo-dica">${copiado ? html`<strong>Copiado!</strong> ` : ''}${passo} ${valorCent ? 'O valor já vem preenchido.' : 'Digite o valor que o sítio confirmar.'}</p>
+    ${codigoVisivel ? html`<textarea class="pix-codigo" readonly rows="4" value=${codigo} onFocus=${(e) => e.target.select()}></textarea>` : ''}
+    <button type="button" class="link" onClick=${() => copiar(chaveParaColar(chave), 'Chave Pix copiada')}>Prefiro copiar só a chave</button>
+  </div>`;
 }
 
 function textoParaOSitio(p) {
@@ -632,6 +698,8 @@ function textoParaOSitio(p) {
   for (const i of p.itens) linhas.push(`• ${qtd(i.qtd)} ${i.unidade} ${i.nome}`);
   linhas.push(p.entrega === 'entregar' ? `Entregar em: ${p.endereco}` : 'Vou retirar no sítio.');
   if (p.dataDesejada) linhas.push(`Para: ${dataBR(p.dataDesejada)}`);
+  const forma = separarPagamento(p.obs).forma;
+  if (forma) linhas.push(`Pagamento: ${forma}`);
   return linhas.join('\n');
 }
 
@@ -641,8 +709,10 @@ function Enviado({ id }) {
   useEffect(() => {
     if (!pedido) loja.db.ler('pedidos/' + id).then(setPedido).catch(() => {});
   }, [id]);
+  const pix = pedido && separarPagamento(pedido.obs).forma === 'Pix';
   return html`<${Tela} titulo="Pedido enviado">
     <${Vazio} icone="circle-check" texto="Pedido enviado! O sítio vai confirmar e você acompanha em “Meus pedidos”.">
+      ${pix ? html`<div style="width:100%;text-align:left"><${PagarComPix} valorCent=${valorParaPix(pedido)} /></div>` : ''}
       <div class="botoes" style="width:100%">
         ${info.whatsapp && pedido ? html`<${Botao} icone="message-circle" href=${linkWhatsApp(info.whatsapp, textoParaOSitio(pedido))}>Avisar o sítio no WhatsApp</${Botao}>` : ''}
         <${Botao} tipo="secundario" href="#/meus">Ver meus pedidos</${Botao}>
@@ -707,6 +777,9 @@ function MeusPedidos() {
                 ${p.totalCent ? html`<p><strong>${p.status === 'novo' ? 'Total estimado' : 'Total'}: ${dinheiro(p.totalCent)}</strong></p>` : ''}
                 <p class="suave">${p.entrega === 'entregar' ? 'Entregar' : 'Retirar no sítio'}${p.dataDesejada ? ' · para ' + dataBR(p.dataDesejada) : ''}</p>
                 <p class="suave">${s.texto}</p>
+                ${['novo', 'confirmado'].includes(p.status) && separarPagamento(p.obs).forma === 'Pix'
+                  ? html`<div style="margin-top:12px"><${PagarComPix} valorCent=${valorParaPix(p)} compacto /></div>`
+                  : ''}
                 ${p.status === 'novo'
                   ? html`<div class="botoes" style="margin-top:12px">
                       <${Botao} tipo="secundario" icone="ban" onClick=${() => cancelar(p)} desativado=${cancelando === p.id}>${cancelando === p.id ? 'Cancelando…' : 'Cancelar pedido'}</${Botao}>

@@ -1,7 +1,7 @@
 // Service worker: guarda os arquivos do app no aparelho para abrir rápido e sem internet.
 // A lista abaixo é gerada por tools/release.mjs — rode "npm run release" (na pasta tools) antes de publicar.
 // <gerado>
-const VERSAO = '2026.10.12-40230dd0';
+const VERSAO = '2026.10.12-45a6fe30';
 const ARQUIVOS = [
   "./",
   "index.html",
@@ -64,6 +64,14 @@ self.addEventListener('message', (e) => {
   if (e.data === 'atualizar') self.skipWaiting();
 });
 
+// O pedido é da página de pedidos (pasta pedido/), ou de um arquivo que ela está carregando?
+async function daPaginaDePedidos(e, url) {
+  if (e.request.mode === 'navigate') return url.pathname.includes('/pedido/');
+  if (!e.clientId) return false;
+  const cliente = await self.clients.get(e.clientId);
+  return !!cliente && new URL(cliente.url).pathname.includes('/pedido/');
+}
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -72,6 +80,17 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
+      if (await daPaginaDePedidos(e, url)) {
+        // A página de pedidos (aberta no celular de quem também usa o app) busca sempre a versão publicada,
+        // como no celular dos clientes, para mostrar na hora o que mudou. Sem internet, usa a guardada.
+        try {
+          return await (req.mode === 'navigate' ? fetch(req) : fetch(req, { cache: 'no-cache' }));
+        } catch (erro) {
+          const guardado = await cache.match(req.mode === 'navigate' ? 'pedido/index.html' : req);
+          if (guardado) return guardado;
+          throw erro;
+        }
+      }
       const guardado = await cache.match(req, { ignoreSearch: req.mode === 'navigate' });
       if (guardado) return guardado;
       try {

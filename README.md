@@ -125,3 +125,6 @@ node ../tests/e2e-local.mjs http://localhost:8123   # teste com tela de iPhone (
 projeto `demo-sitio`), e `tests/e2e-nuvem.mjs` testa login, acesso, sincronização e modo offline com eles.
 `http://localhost:8123/pedido/?emulador` abre a página de pedidos nos emuladores, e `tests/e2e-pedidos.mjs`
 testa o pedido do cliente até virar venda e entrega, além de conferir o que as regras bloqueiam.
+`tests/e2e-versao.mjs` (sem emuladores) confere que uma versão nova da página de pedidos chega a quem está com
+ela aberta: a página recarrega sozinha quando o cliente volta para ela, e o service worker do app não serve a
+página de pedidos guardada (ela busca sempre a versão publicada).

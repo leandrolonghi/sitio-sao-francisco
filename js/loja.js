@@ -11,6 +11,7 @@ import {
 } from './ui.js';
 import { dinheiro, qtd, hoje, dataAmigavel, dataBR, formatarTelefone, novoId, linkWhatsApp, arred3, plural } from './util.js';
 import { INFO_LOJA, STATUS_PEDIDO, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco, textoOuNulo } from './loja-comum.js';
+import { VERSAO } from './versao.js';
 
 // ---------- Estado da página ----------
 
@@ -19,6 +20,7 @@ const CHAVE_CLIENTE = 'sitio.loja.cliente';
 const CHAVE_CARRINHO = 'sitio.loja.carrinho';
 const CHAVE_MEUS = 'sitio.loja.meus';
 const CHAVE_FOTOS = 'sitio.loja.fotos';
+const CHAVE_RECARREGOU = 'sitio.loja.recarregou';
 
 function ler(chave, padrao) {
   try {
@@ -789,6 +791,27 @@ function Pagina() {
 
 // ---------- Início ----------
 
+// O celular deixa a página aberta por dias. Ao voltar para ela, confere se o sítio publicou uma versão nova
+// da página (ex.: fotos dos produtos) e recarrega, para o cliente ver o que mudou. O carrinho fica guardado;
+// só não recarrega no meio de um formulário.
+async function conferirVersao() {
+  try {
+    const resp = await fetch(new URL('versao.js', import.meta.url), { cache: 'no-store' });
+    const nova = (await resp.text()).match(/VERSAO = '([^']+)'/)?.[1];
+    const tela = location.hash.replace(/^#\/?/, '').split('/')[0];
+    const escrevendo = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+    if (!nova || nova === VERSAO || !loja.cliente || tela === 'finalizar' || tela === 'cadastro' || escrevendo) return;
+    if (sessionStorage.getItem(CHAVE_RECARREGOU) === nova) return; // já recarregou para essa versão: não insiste
+    sessionStorage.setItem(CHAVE_RECARREGOU, nova);
+    // busca de novo os arquivos que a página usa, para o navegador não recarregar com os guardados
+    const arquivos = performance.getEntriesByType('resource').map((r) => r.name).filter((u) => u.startsWith(location.origin));
+    await Promise.all([location.href.split('#')[0], ...arquivos].map((u) => fetch(u, { cache: 'reload' }).catch(() => {})));
+    location.reload();
+  } catch (e) {
+    console.warn('Não deu para conferir a versão da página', e);
+  }
+}
+
 function configuracao() {
   const params = new URLSearchParams(location.search);
   if (location.hostname === 'localhost' && params.has('emulador')) {
@@ -816,6 +839,7 @@ async function iniciar() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || Date.now() - ultimaVez < 60000) return;
     ultimaVez = Date.now();
+    conferirVersao();
     carregarCatalogo();
     if (loja.sessao && loja.cliente) lerCadastro();
   });

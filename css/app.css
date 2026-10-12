@@ -423,6 +423,12 @@ div.linha:active { background: transparent; }
 @media (prefers-color-scheme: dark) {
   .dias-semana button.ativo, .datas-entrega button.ativo, .datas-entrega button.ativo span { color: #0f1a12; }
 }
+.horarios { grid-template-columns: repeat(4, 1fr); }
+.horarios button { min-height: 46px; font-variant-numeric: tabular-nums; }
+.campos-horario { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.campos-horario label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.campos-horario span { color: var(--texto-suave); font-size: 15px; }
+.campos-horario input { flex: 1; min-width: 0; width: 100%; }
 .rodape-frete { margin: -4px 0 8px; font-size: 14px; color: var(--verde); font-weight: 600; }
 .vazio-cartao { width: 100%; text-align: left; color: var(--texto); margin-bottom: 16px; }
 .vazio .cartao-endereco .icone { margin: 2px 0 0; opacity: 1; }

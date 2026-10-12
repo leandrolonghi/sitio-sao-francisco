@@ -5,6 +5,7 @@ import { dinheiro, qtd, hoje, addDias, dataAmigavel, dataBR, formatarTelefone, l
 import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, Interruptor, Texto, Campo, CampoDinheiro, avisar, confirmar, ir } from '../ui.js';
 import {
   INFO_LOJA, STATUS_PEDIDO, DIAS_DA_SEMANA, separarPagamento, nomeDoPedido, diasDeEntrega, textoDiasDeEntrega, freteGratisAPartir, linkDaRetirada, textoOuNulo,
+  horarioDe, textoHorario,
 } from '../loja-comum.js';
 import { ehIOS } from '../estado.js';
 import { lerChavePix } from '../pix.js';
@@ -115,7 +116,7 @@ function ItensPedido({ p }) {
 }
 
 function CartaoPedido({ p }) {
-  const { forma, detalhe, obs } = separarPagamento(p.obs);
+  const { forma, detalhe, hora, obs } = separarPagamento(p.obs);
   const virarVenda = () => ir(`/vendas/nova?pedido=${p.id}&cliente=${clienteDoPedido(p)}`);
   const recusar = () => {
     if (!confirmar(`Recusar o pedido de ${p.nome}? Ele vai aparecer como "não aceito" para o cliente.`)) return;
@@ -132,7 +133,7 @@ function CartaoPedido({ p }) {
     ${p.totalCent ? html`<p><strong>Total estimado: ${dinheiro(p.totalCent)}</strong></p>` : ''}
     <p class="entrega-endereco">
       <${Icone} nome=${p.entrega === 'entregar' ? 'truck' : 'house'} tam=${18} />
-      <span>${p.entrega === 'entregar' ? 'Entregar' + (p.endereco ? ': ' + p.endereco : '') : 'Vai retirar no local'}${p.dataDesejada ? ` · para ${dataBR(p.dataDesejada)}` : ''}</span>
+      <span>${p.entrega === 'entregar' ? 'Entregar' + (p.endereco ? ': ' + p.endereco : '') : 'Vai retirar no local'}${p.dataDesejada ? ` · para ${dataBR(p.dataDesejada)}` : ''}${hora ? ` · a partir das ${hora}` : ''}</span>
     </p>
     ${forma ? html`<p class="entrega-endereco"><${Icone} nome="wallet" tam=${18} /><span>Pagamento: ${forma}${detalhe ? ` (${detalhe})` : ''}</span></p>` : ''}
     ${obs ? html`<p class="suave" style="white-space:pre-line">“${obs}”</p>` : ''}
@@ -186,7 +187,13 @@ export function Pedidos() {
                 <strong>${p.nome}</strong>
                 <${Etiqueta} tipo=${p.status === 'em_rota' ? 'info' : 'ok'}>${STATUS_PEDIDO[p.status].nome}</${Etiqueta}>
               </div>
-              <p class="suave">${[p.numero ? 'nº ' + p.numero : '', p.entrega === 'entregar' ? 'Entregar' : 'Vai retirar no local', p.dataDesejada ? dataAmigavel(p.dataDesejada) : '', p.totalCent ? dinheiro(p.totalCent) : ''].filter(Boolean).join(' · ')}</p>
+              <p class="suave">${[
+                p.numero ? 'nº ' + p.numero : '',
+                p.entrega === 'entregar' ? 'Entregar' : 'Vai retirar no local',
+                p.dataDesejada ? dataAmigavel(p.dataDesejada) : '',
+                separarPagamento(p.obs).hora ? 'a partir das ' + separarPagamento(p.obs).hora : '',
+                p.totalCent ? dinheiro(p.totalCent) : '',
+              ].filter(Boolean).join(' · ')}</p>
               <div class="botoes">
                 ${p.entrega === 'entregar' ? html`<${BotaoSaida} telefone=${p.telefone} nome=${p.nome} pedido=${p} aCaminho=${p.status === 'em_rota'} />` : ''}
                 <${Botao} tipo="secundario" icone="check" onClick=${() => concluir(p)}>${p.entrega === 'entregar' ? 'Foi entregue' : 'Cliente retirou'}</${Botao}>
@@ -265,6 +272,7 @@ export function resumoEntrega(info) {
     info.taxaEntregaCent > 0 ? (info.freteGratis ? 'frete grátis (promoção)' : 'entrega ' + dinheiro(info.taxaEntregaCent)) : 'entrega sem valor',
     aPartir ? 'grátis a partir de ' + dinheiro(aPartir) : '',
     dias.length && dias.length < 7 ? textoDiasDeEntrega(dias) : '',
+    textoHorario(horarioDe(info)),
   ]
     .filter(Boolean)
     .join(' · ');
@@ -281,8 +289,21 @@ export function AjustesEntrega() {
   const [retirada, setRetirada] = useState(info.retiradaEndereco || '');
   const [ponto, setPonto] = useState(info.retiradaLat != null ? { lat: info.retiradaLat, lng: info.retiradaLng } : null);
   const [buscando, setBuscando] = useState(false);
+  const [entregaDas, setEntregaDas] = useState(info.entregaDas || '');
+  const [entregaAte, setEntregaAte] = useState(info.entregaAte || '');
+  const [retiradaDas, setRetiradaDas] = useState(info.retiradaDas || '');
+  const [retiradaAte, setRetiradaAte] = useState(info.retiradaAte || '');
+  const [erros, setErros] = useState({});
 
   const salvar = () => {
+    // horário: começo e fim, com o fim depois do começo (ou os dois em branco)
+    const errado = (das, ate) => (das || ate) && !(das && ate && ate > das);
+    const er = {
+      entrega: errado(entregaDas, entregaAte) ? 'Coloque o começo e o fim, com o fim depois do começo.' : '',
+      retirada: errado(retiradaDas, retiradaAte) ? 'Coloque o começo e o fim, com o fim depois do começo.' : '',
+    };
+    setErros(er);
+    if (er.entrega || er.retirada) return avisar('Confira o horário.', 'erro');
     salvarInfoLoja({
       taxaEntregaCent: taxa > 0 ? taxa : null,
       freteGratis: promocao,
@@ -291,8 +312,16 @@ export function AjustesEntrega() {
       retiradaEndereco: textoOuNulo(retirada),
       retiradaLat: ponto ? ponto.lat : null,
       retiradaLng: ponto ? ponto.lng : null,
+      entregaDas: entregaDas || null,
+      entregaAte: entregaAte || null,
+      retiradaDas: retiradaDas || null,
+      retiradaAte: retiradaAte || null,
     });
     avisar('Entrega e retirada salvas');
+  };
+  const mudarHorario = (set, qual) => (v) => {
+    set(v);
+    setErros((e) => ({ ...e, [qual]: '' }));
   };
   const alternarDia = (d) => setDias((ds) => (ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d]));
   // marca o ponto exato do local de retirada (a pessoa precisa estar lá)
@@ -325,9 +354,27 @@ export function AjustesEntrega() {
         ${[1, 2, 3, 4, 5, 6, 0].map((d) => html`<button type="button" class=${dias.includes(d) ? 'ativo' : ''} aria-pressed=${dias.includes(d)} onClick=${() => alternarDia(d)}>${DIAS_DA_SEMANA[d].slice(0, 3)}</button>`)}
       </div>
     </${Campo}>
+    <${CampoHorario}
+      rotulo="Horário de entrega"
+      das=${entregaDas}
+      ate=${entregaAte}
+      setDas=${mudarHorario(setEntregaDas, 'entrega')}
+      setAte=${mudarHorario(setEntregaAte, 'entrega')}
+      erro=${erros.entrega}
+      dica="Na página, o cliente escolhe a partir de que horas quer receber, dentro deste horário. Em branco, não pergunta."
+    />
     <${Secao} titulo="Retirar no local">
       <div class="formulario">
         <${Texto} rotulo="Endereço para retirar" valor=${retirada} onChange=${setRetirada} placeholder="Ex.: Rua das Flores, 100, Centro" dica="Aparece para o cliente que escolhe Retirar no local, com o botão do mapa." />
+        <${CampoHorario}
+          rotulo="Horário de retirada"
+          das=${retiradaDas}
+          ate=${retiradaAte}
+          setDas=${mudarHorario(setRetiradaDas, 'retirada')}
+          setAte=${mudarHorario(setRetiradaAte, 'retirada')}
+          erro=${erros.retirada}
+          dica="O cliente escolhe a partir de que horas vai retirar, dentro deste horário. Em branco, não pergunta."
+        />
         <div class="cartao">
           <p style="margin:0 0 12px">${ponto ? html`Localização marcada no mapa. <a href=${mapa} target="_blank" rel="noopener">Ver no mapa</a>` : 'Para o cliente achar fácil, marque o ponto no mapa: estando no local, toque no botão.'}</p>
           <div class="botoes">
@@ -340,14 +387,26 @@ export function AjustesEntrega() {
   </${Tela}>`;
 }
 
+// Horário "das … às …" com o relógio do celular.
+function CampoHorario({ rotulo, das, ate, setDas, setAte, dica, erro }) {
+  const mudar = (set) => (e) => set(e.target.value);
+  return html`<${Campo} div rotulo=${rotulo} dica=${dica} erro=${erro}>
+    <div class="campos-horario">
+      <label><span>das</span><input type="time" value=${das} onInput=${mudar(setDas)} onChange=${mudar(setDas)} aria-label=${rotulo + ', começo'} /></label>
+      <label><span>às</span><input type="time" value=${ate} onInput=${mudar(setAte)} onChange=${mudar(setAte)} aria-label=${rotulo + ', fim'} /></label>
+    </div>
+  </${Campo}>`;
+}
+
 // Venda feita a partir de um pedido: dados para preencher a nova venda.
 export function dadosDoPedido(id) {
   const p = id && banco.get('pedidos', id);
   if (!p) return null;
-  const { forma, obs } = separarPagamento(p.obs);
+  const { forma, hora, obs } = separarPagamento(p.obs);
   return {
     pedido: p,
     forma,
+    hora,
     obs,
     itens: (p.itens || []).map((i) => ({
       produtoId: banco.get('produtos', i.produtoId) ? i.produtoId : null,

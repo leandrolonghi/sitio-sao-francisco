@@ -6,7 +6,7 @@ import {
 } from '../calc.js';
 import { dinheiro, qtd, hoje, addDias, dataAmigavel, dataBR, dataCurta, periodo, entre, contem, novoId, linkWhatsApp, arred3, plural } from '../util.js';
 import {
-  Tela, Secao, Lista, Linha, Etiqueta, Vazio, Botao, BotaoTopo, Icone, CampoData, Seletor, Segmentado, Escolha,
+  Tela, Secao, Lista, Linha, Etiqueta, Vazio, Botao, BotaoTopo, Icone, Campo, CampoData, Seletor, Segmentado, Escolha,
   CampoDinheiro, EntradaDinheiro, EntradaQtd, AreaTexto, Interruptor, Folha, CamposEndereco, CartaoEndereco, avisar, trocar, voltar, confirmar,
 } from '../ui.js';
 import { camposEndereco, mesmoEndereco, enderecoCompleto, textoOuNulo, CAMPOS_ENDERECO, taxaDaEntrega } from '../loja-comum.js';
@@ -126,6 +126,7 @@ export function FormVenda({ id, query = {} }) {
   const [vencimento, setVencimento] = useState(existente?.vencimento || '');
   const [entregar, setEntregar] = useState(existente ? !!existente.entrega : pedido?.entrega === 'entregar');
   const [dataEntrega, setDataEntrega] = useState(existente?.entrega?.data || existente?.data || (pedido?.dataDesejada > hoje() ? pedido.dataDesejada : hoje()));
+  const [horaEntrega, setHoraEntrega] = useState(existente ? existente.entrega?.hora || '' : doPedido?.hora || '');
   const [end, setEnd] = useState(() => enderecoInicial(banco.get('clientes', existente?.clienteId || query.cliente), pedido));
   const [mudandoEndereco, setMudandoEndereco] = useState(false);
   // valor da entrega: o da venda, o do pedido ou o padrão dos ajustes da página de pedidos
@@ -203,7 +204,13 @@ export function FormVenda({ id, query = {} }) {
       obs: obs.trim() || null,
       vencimento: ficaDevendo ? vencimento : existente?.vencimento || null,
       entrega: entregar
-        ? { data: dataEntrega, feita: existente?.entrega?.feita || false, feitaEm: existente?.entrega?.feitaEm || null, aCaminho: existente?.entrega?.aCaminho || false }
+        ? {
+            data: dataEntrega,
+            hora: horaEntrega || null,
+            feita: existente?.entrega?.feita || false,
+            feitaEm: existente?.entrega?.feitaEm || null,
+            aCaminho: existente?.entrega?.aCaminho || false,
+          }
         : null,
       pedidoId: existente?.pedidoId || pedido?.id || null,
       cancelada: existente?.cancelada || false,
@@ -324,6 +331,9 @@ export function FormVenda({ id, query = {} }) {
         <${Interruptor} rotulo="Entregar no endereço do cliente" dica="A venda aparece na aba Entregas" valor=${entregar} onChange=${setEntregar} />
         ${entregar
           ? html`<${CampoData} rotulo="Entregar em" valor=${dataEntrega} onChange=${setDataEntrega} />
+              <${Campo} rotulo="A partir das (opcional)">
+                <input type="time" value=${horaEntrega} onInput=${(e) => setHoraEntrega(e.target.value)} onChange=${(e) => setHoraEntrega(e.target.value)} />
+              </${Campo}>
               ${!mudandoEndereco && enderecoCompleto(end)
                 ? html`<${CartaoEndereco} rotulo="Endereço" texto=${enderecoCompleto(end)} referencia=${end.referencia} onMudar=${() => setMudandoEndereco(true)} />`
                 : html`<${CamposEndereco} dados=${end} mudarCampo=${mudarEndereco} erros=${{ endereco: erros.endereco }} />
@@ -470,7 +480,7 @@ export function DetalheVenda({ id }) {
       ? html`<${Secao} titulo="Entrega">
           <div class="cartao entrega">
             <div class="entrega-topo">
-              <span>${v.entrega.feita ? `Entregue ${dataAmigavel(v.entrega.feitaEm)}` : `Entregar ${dataAmigavel(v.entrega.data || v.data)}`}</span>
+              <span>${v.entrega.feita ? `Entregue ${dataAmigavel(v.entrega.feitaEm)}` : `Entregar ${dataAmigavel(v.entrega.data || v.data)}${v.entrega.hora ? ' a partir das ' + v.entrega.hora : ''}`}</span>
               <${Etiqueta} tipo=${v.entrega.feita || v.entrega.aCaminho ? 'ok' : 'info'}>${v.entrega.feita ? 'Entregue' : v.entrega.aCaminho ? 'A caminho' : 'A entregar'}</${Etiqueta}>
             </div>
             ${endereco ? html`<${EnderecoEntrega} v=${v} endereco=${endereco} />` : html`<${SemEndereco} venda=${v} />`}

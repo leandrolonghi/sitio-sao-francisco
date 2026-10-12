@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   telefoneNormal, mesmoTelefone, nomeNormal, emailDoCliente, senhaDoCliente, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco, nomeDoPedido,
-  taxaDaEntrega, freteGratisAPartir, diasDeEntrega, textoDiasDeEntrega, proximasEntregas, linkDaRetirada,
+  taxaDaEntrega, freteGratisAPartir, diasDeEntrega, textoDiasDeEntrega, proximasEntregas, linkDaRetirada, horarioDe, horariosDe, textoHorario,
 } from '../js/loja-comum.js';
 
 test('telefone sem formatação, sem 55 e sem zero na frente', () => {
@@ -66,4 +66,18 @@ test('mapa do local de retirada: o ponto marcado ou o endereço', () => {
   assert.equal(linkDaRetirada(ponto, true), 'https://maps.apple.com/?ll=-13.67,-57.89&q=Granja%20Longhi');
   assert.equal(linkDaRetirada({ retiradaEndereco: 'Rua A, 1' }), 'https://www.google.com/maps/search/?api=1&query=Rua%20A%2C%201');
   assert.equal(linkDaRetirada({}), null);
+});
+
+test('horário de entrega e de retirada: "a partir das" de hora em hora', () => {
+  const info = { entregaDas: '08:00', entregaAte: '12:00', retiradaDas: '14:30', retiradaAte: '17:00' };
+  assert.deepEqual(horarioDe(info), { das: '08:00', ate: '12:00' });
+  assert.deepEqual(horarioDe(info, true), { das: '14:30', ate: '17:00' });
+  assert.equal(horarioDe({ entregaDas: '10:00' }), null, 'sem o fim, não tem horário');
+  assert.equal(horarioDe({ entregaDas: '10:00', entregaAte: '09:00' }), null, 'fim antes do começo');
+  assert.deepEqual(horariosDe(horarioDe(info)), ['08:00', '09:00', '10:00', '11:00']);
+  assert.deepEqual(horariosDe(horarioDe(info, true)), ['14:30', '15:30', '16:30']);
+  assert.deepEqual(horariosDe(horarioDe(info), '09:05'), ['10:00', '11:00'], 'hoje: só os que não passaram');
+  assert.deepEqual(horariosDe(horarioDe(info), '11:30'), []);
+  assert.deepEqual(horariosDe(null), []);
+  assert.equal(textoHorario(horarioDe(info)), 'das 08:00 às 12:00');
 });

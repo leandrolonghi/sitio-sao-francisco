@@ -15,8 +15,8 @@ import {
 } from './util.js';
 import {
   INFO_LOJA, STATUS_PEDIDO, FORMAS_NA_PAGINA, CIDADE_ATENDIDA, DIAS_DA_SEMANA, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco,
-  textoOuNulo, linhaPagamento, separarPagamento, valorParaPix, nomeDoPedido, taxaDaEntrega, freteGratisAPartir, diasDeEntrega, textoDiasDeEntrega,
-  proximasEntregas, linkDaRetirada,
+  textoOuNulo, linhaPagamento, linhaHorario, separarPagamento, valorParaPix, nomeDoPedido, taxaDaEntrega, freteGratisAPartir, diasDeEntrega,
+  textoDiasDeEntrega, proximasEntregas, linkDaRetirada, horarioDe, horariosDe, textoHorario,
 } from './loja-comum.js';
 import { codigoPix, descreverChave, chaveParaColar } from './pix.js';
 import { VERSAO } from './versao.js';
@@ -514,7 +514,12 @@ const diasRestritos = (info) => {
 // Faixa da tela inicial: frete grátis (promoção ou a partir de um valor), valor e dias da entrega.
 function AvisoEntrega({ info }) {
   const dias = diasRestritos(info);
-  const quando = dias ? html`<p>Entregas e retiradas ${textoDiasDeEntrega(dias)}.</p>` : '';
+  const horarios = [
+    horarioDe(info) ? 'entrega ' + textoHorario(horarioDe(info)) : '',
+    horarioDe(info, true) ? 'retirada ' + textoHorario(horarioDe(info, true)) : '',
+  ].filter(Boolean);
+  const quando = html`${dias ? html`<p>Entregas e retiradas ${textoDiasDeEntrega(dias)}.</p>` : ''}${horarios.length ? html`<p>Horário: ${horarios.join('; ')}.</p>` : ''}`;
+  const temQuando = dias || horarios.length;
   const aPartir = freteGratisAPartir(info);
   if (info.freteGratis) {
     return html`<div class="faixa ok"><${Icone} nome="gift" /><div class="faixa-corpo">
@@ -527,7 +532,7 @@ function AvisoEntrega({ info }) {
       <p>Abaixo disso, a entrega é ${dinheiro(info.taxaEntregaCent)}. Retirando no local, não paga entrega.</p>${quando}
     </div></div>`;
   }
-  if (!(info.taxaEntregaCent > 0) && !dias) return '';
+  if (!(info.taxaEntregaCent > 0) && !temQuando) return '';
   return html`<div class="faixa"><${Icone} nome="truck" /><div class="faixa-corpo">
     ${info.taxaEntregaCent > 0 ? html`<p>Entrega: <strong>${dinheiro(info.taxaEntregaCent)}</strong>. Retirando no local, não paga entrega.</p>` : ''}${quando}
   </div></div>`;
@@ -597,8 +602,7 @@ function nomeDoDia(d) {
 }
 
 // Datas em que o sítio entrega ou o cliente retira (os dias marcados no app); os outros dias não aparecem.
-function DatasDeEntrega({ dias, valor, onChange, retirar }) {
-  const datas = proximasEntregas(dias, hoje());
+function DatasDeEntrega({ dias, datas, valor, onChange, retirar }) {
   return html`<div class="campo">
     <span class="campo-rotulo">${retirar ? 'Quando vai retirar?' : 'Quando entregar?'}</span>
     <div class="datas-entrega" role="radiogroup">
@@ -611,6 +615,19 @@ function DatasDeEntrega({ dias, valor, onChange, retirar }) {
     <span class="campo-dica">${retirar ? 'Dá para retirar' : 'O sítio entrega'} ${textoDiasDeEntrega(dias)}.</span>
   </div>`;
 }
+
+// "A partir das": horários dentro do horário de entrega (ou de retirada) que o sítio marcou no app.
+function Horarios({ horarios, valor, onChange, retirar, horario }) {
+  return html`<div class="campo">
+    <span class="campo-rotulo">${retirar ? 'Retirar a partir das' : 'Entregar a partir das'}</span>
+    <div class="datas-entrega horarios" role="radiogroup">
+      ${horarios.map((h) => html`<button type="button" role="radio" aria-checked=${valor === h} class=${valor === h ? 'ativo' : ''} onClick=${() => onChange(h)}>${h}</button>`)}
+    </div>
+    <span class="campo-dica">${retirar ? 'Horário de retirada' : 'O sítio entrega'} ${textoHorario(horario)}.</span>
+  </div>`;
+}
+
+const horaAgora = () => new Date().toTimeString().slice(0, 5);
 
 // Onde retirar: o endereço que o sítio pôs no app e o botão do mapa.
 function CartaoRetirada({ info }) {
@@ -632,6 +649,7 @@ function Finalizar() {
   const [mudandoEndereco, setMudandoEndereco] = useState(() => Object.keys(errosDoEndereco(camposEndereco(cliente))).length > 0);
   const [data, setData] = useState('');
   const [dataEntrega, setDataEntrega] = useState('');
+  const [hora, setHora] = useState('');
   const [obs, setObs] = useState('');
   const [forma, setForma] = useState('');
   const [troco, setTroco] = useState(null);
@@ -653,9 +671,15 @@ function Finalizar() {
   const entregaGratis = entregar && !taxa && (info.taxaEntregaCent > 0 || info.freteGratis);
   // dias de entrega marcados no app (valem também para retirar): o cliente escolhe uma dessas datas
   // (a primeira já vem marcada)
+  // horário marcado no app (um para entregar, outro para retirar): o cliente escolhe a partir de que horas;
+  // para hoje, só os horários que ainda não passaram (e hoje some das datas quando já passou de todos)
+  const horario = horarioDe(info, !entregar);
   const dias = diasRestritos(info);
-  const datas = dias ? proximasEntregas(dias, hoje()) : [];
+  const hojeJaPassou = (d) => d === hoje() && horario && !horariosDe(horario, horaAgora()).length;
+  const datas = dias ? proximasEntregas(dias, hoje(), 7).filter((d) => !hojeJaPassou(d)).slice(0, 6) : [];
   const quando = dias ? (datas.includes(dataEntrega) ? dataEntrega : datas[0] || '') : data;
+  const horarios = horariosDe(horario, quando === hoje() ? horaAgora() : null);
+  const horaEscolhida = horarios.includes(hora) ? hora : horarios[0] || '';
 
   const enviar = async () => {
     const er = {};
@@ -668,6 +692,7 @@ function Finalizar() {
       }
     }
     if (!dias && data && data < hoje()) er.data = 'Escolha hoje ou um dia que ainda vai chegar.';
+    else if (horario && !horaEscolhida) er.data = `Hoje já passou do horário de ${entregar ? 'entrega' : 'retirada'}. Escolha outro dia.`;
     if (!forma) er.pagamento = 'Escolha como vai pagar.';
     if (forma === 'Dinheiro' && troco > 0 && !semPreco && troco <= total) er.troco = `Coloque um valor maior que o total (${dinheiro(total)}), ou deixe em branco.`;
     setErros(er);
@@ -687,7 +712,7 @@ function Finalizar() {
       itens,
       entregaCent: taxa || undefined,
       totalCent: total,
-      obs: [linhaPagamento(forma, detalhe), obs.trim(), referencia].filter(Boolean).join('\n'),
+      obs: [linhaPagamento(forma, detalhe), horaEscolhida ? linhaHorario(horaEscolhida) : '', obs.trim(), referencia].filter(Boolean).join('\n'),
       status: 'novo',
       criadoEm: agora,
       atualizadoEm: agora,
@@ -739,8 +764,10 @@ function Finalizar() {
           <p class="campo-dica" style="margin:0">Este endereço fica salvo no seu cadastro.</p>`
       : ''}
     ${dias
-      ? html`<${DatasDeEntrega} dias=${dias} valor=${quando} onChange=${setDataEntrega} retirar=${!entregar} />`
+      ? html`<${DatasDeEntrega} dias=${dias} datas=${datas} valor=${quando} onChange=${setDataEntrega} retirar=${!entregar} />`
       : html`<${CampoData} rotulo="Para quando?" valor=${data} onChange=${setData} dica="Deixe em branco para o quanto antes" erro=${erros.data} opcional />`}
+    ${horario && horarios.length ? html`<${Horarios} horarios=${horarios} valor=${horaEscolhida} onChange=${setHora} retirar=${!entregar} horario=${horario} />` : ''}
+    ${horario && !horarios.length ? html`<p class="campo-dica erro" style="margin:-8px 0 0">Hoje já passou do horário de ${entregar ? 'entrega' : 'retirada'} (${textoHorario(horario)}). Escolha outro dia.</p>` : ''}
     <${Segmentado} rotulo="Como vai pagar?" valor=${forma} onChange=${setForma} opcoes=${FORMAS_NA_PAGINA.map((f) => [f, f])} />
     ${erros.pagamento && !forma ? html`<p class="campo-dica erro" style="margin:-8px 0 0">${erros.pagamento}</p>` : ''}
     ${forma === 'Pix' ? html`<${PagarComPix} valorCent=${semPreco ? null : total} />` : ''}
@@ -819,8 +846,8 @@ function textoParaOSitio(p) {
   const linhas = [`Olá! Fiz um pedido pela página (${p.nome}):`];
   for (const i of p.itens) linhas.push(`• ${qtd(i.qtd)} ${i.unidade} ${i.nome}`);
   linhas.push(p.entrega === 'entregar' ? `Entregar em: ${p.endereco}` : 'Vou retirar no local.');
-  if (p.dataDesejada) linhas.push(`Para: ${dataBR(p.dataDesejada)}`);
-  const { forma, detalhe } = separarPagamento(p.obs);
+  const { forma, detalhe, hora } = separarPagamento(p.obs);
+  if (p.dataDesejada || hora) linhas.push(`Para: ${[p.dataDesejada ? dataBR(p.dataDesejada) : '', hora ? 'a partir das ' + hora : ''].filter(Boolean).join(', ')}`);
   if (forma) linhas.push(`Pagamento: ${forma}${detalhe ? ` (${detalhe})` : ''}`);
   return linhas.join('\n');
 }
@@ -858,7 +885,7 @@ const resumoDosItens = (p) => (p.itens || []).map((i) => `${qtd(i.qtd)} ${i.unid
 function ResumoPedido({ p, aberto, onAbrir, children }) {
   const s = STATUS_PEDIDO[p.status] || STATUS_PEDIDO.novo;
   const dia = new Date(p.criadoEm).toLocaleDateString('sv-SE');
-  const { forma, detalhe } = separarPagamento(p.obs);
+  const { forma, detalhe, hora } = separarPagamento(p.obs);
   const mapa = linkDaRetirada(loja.info, ehIOS());
   return html`<div class=${'cartao pedido pedido-resumo' + (aberto ? ' aberto' : '')}>
     <button type="button" class="pedido-cabeca" aria-expanded=${aberto} onClick=${onAbrir}>
@@ -879,7 +906,7 @@ function ResumoPedido({ p, aberto, onAbrir, children }) {
             ${p.entregaCent ? html`<li><span>Entrega</span><span>${dinheiro(p.entregaCent)}</span></li>` : ''}
             ${p.totalCent ? html`<li><strong>${p.status === 'novo' ? 'Total estimado' : 'Total'}</strong><strong>${dinheiro(p.totalCent)}</strong></li>` : ''}
           </ul>
-          <p class="suave">${p.entrega === 'entregar' ? 'Entregar' : 'Retirar no local'}${p.dataDesejada ? ' · para ' + dataBR(p.dataDesejada) : ''}</p>
+          <p class="suave">${p.entrega === 'entregar' ? 'Entregar' : 'Retirar no local'}${p.dataDesejada ? ' · para ' + dataBR(p.dataDesejada) : ''}${hora ? ' · a partir das ' + hora : ''}</p>
           ${p.entrega === 'retirar' && mapa && ['novo', 'confirmado'].includes(p.status)
             ? html`<p>${loja.info.retiradaEndereco || ''} <a href=${mapa} target="_blank" rel="noopener">Ver no mapa</a></p>`
             : ''}

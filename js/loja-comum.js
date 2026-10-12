@@ -63,17 +63,21 @@ export const mesmoEndereco = (a, b) => CAMPOS_ENDERECO.every((k) => (a?.[k] || '
 // Texto sem espaços sobrando (ou null, se ficou vazio).
 export const textoOuNulo = (t) => (t || '').trim().replace(/\s+/g, ' ') || null;
 
-// Como o cliente vai pagar. Vai como a primeira linha da observação do pedido ("Pagamento: Pix"), um campo que
-// as regras do banco já aceitam; o app separa essa linha para mostrar e para preencher a venda.
+// Como o cliente vai pagar e a partir de que horas quer receber (ou retirar). Vão nas primeiras linhas da
+// observação do pedido ("Pagamento: Pix" e "Horário: a partir das 14:00"), um campo que as regras do banco já
+// aceitam; o app separa essas linhas para mostrar e para preencher a venda.
 export const FORMAS_NA_PAGINA = ['Pix', 'Dinheiro', 'Cartão'];
 const LINHA_PAGAMENTO = /^Pagamento: (.+)$/m;
+const LINHA_HORARIO = /^Horário: a partir das (\d{2}:\d{2})$/m;
 // detalhe: ex. "troco para R$ 50,00"
 export const linhaPagamento = (forma, detalhe) => `Pagamento: ${forma}${detalhe ? ' · ' + detalhe : ''}`;
+export const linhaHorario = (hora) => `Horário: a partir das ${hora}`;
 export function separarPagamento(obs) {
   const texto = obs || '';
   const [forma, ...detalhe] = (texto.match(LINHA_PAGAMENTO)?.[1].trim() || '').split(' · ');
-  const resto = texto.replace(LINHA_PAGAMENTO, '').replace(/^\n+|\n+$/g, '').replace(/\n{2,}/g, '\n');
-  return { forma: forma || null, detalhe: detalhe.join(' · ') || null, obs: resto || null };
+  const hora = texto.match(LINHA_HORARIO)?.[1] || null;
+  const resto = texto.replace(LINHA_PAGAMENTO, '').replace(LINHA_HORARIO, '').replace(/^\n+|\n+$/g, '').replace(/\n{2,}/g, '\n');
+  return { forma: forma || null, detalhe: detalhe.join(' · ') || null, hora, obs: resto || null };
 }
 
 // Valor para o código Pix: o total do pedido, se todos os itens têm preço (senão o cliente digita no banco).
@@ -117,6 +121,32 @@ export function proximasEntregas(dias, de, quantas = 6) {
   }
   return datas;
 }
+
+// Horário de entrega (ou de retirada) que o sítio marcou no app: { das, ate } em 'HH:MM', ou null.
+// Fica no _loja: entregaDas e entregaAte, retiradaDas e retiradaAte.
+export function horarioDe(info, retirar = false) {
+  const das = retirar ? info?.retiradaDas : info?.entregaDas;
+  const ate = retirar ? info?.retiradaAte : info?.entregaAte;
+  return das && ate && ate > das ? { das, ate } : null;
+}
+
+const paraMinutos = (h) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
+const deMinutos = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+// Horários "a partir das" que o cliente escolhe: de hora em hora, do começo até antes do fim do horário.
+// depoisDe ('HH:MM'): para hoje, só os que ainda não passaram.
+export function horariosDe(horario, depoisDe = null) {
+  const lista = [];
+  if (!horario) return lista;
+  for (let m = paraMinutos(horario.das); m < paraMinutos(horario.ate); m += 60) {
+    const h = deMinutos(m);
+    if (!depoisDe || h > depoisDe) lista.push(h);
+  }
+  return lista;
+}
+
+// "das 08:00 às 12:00"
+export const textoHorario = (horario) => (horario ? `das ${horario.das} às ${horario.ate}` : '');
 
 // Link do mapa do local de retirada: o ponto marcado no app ou, sem ele, o endereço.
 export function linkDaRetirada(info, ios = false) {

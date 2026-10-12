@@ -200,6 +200,13 @@ await dono.page.getByLabel('Valor da entrega').fill('5');
 await dono.page.click('.dias-semana >> text=Qua');
 await dono.page.click('.dias-semana >> text=Sáb');
 await dono.page.getByLabel('Endereço para retirar').fill('Rua do Sítio, 100, Zona Rural');
+await dono.page.getByLabel('Horário de entrega, começo').fill('08:00');
+await dono.page.getByLabel('Horário de entrega, fim').fill('07:00');
+await dono.page.getByLabel('Horário de retirada, começo').fill('14:00');
+await dono.page.getByLabel('Horário de retirada, fim').fill('18:00');
+await dono.page.click('.rodape-acao >> text=Salvar');
+await dono.esperar('Coloque o começo e o fim, com o fim depois do começo.');
+await dono.page.getByLabel('Horário de entrega, fim').fill('12:00');
 await dono.page.click('text=Usar a localização deste celular');
 await dono.esperar('Localização marcada no mapa');
 await dono.foto('entrega-e-retirada');
@@ -209,7 +216,8 @@ await dono.page.waitForTimeout(1500);
 const lojaComEntrega = (await docsDoServidor('catalogo')).find((d) => d.id === '_loja');
 conferir(
   lojaComEntrega?.taxaEntregaCent === 500 && JSON.stringify(lojaComEntrega.diasEntrega) === '[3,6]' && lojaComEntrega.retiradaLat === -13.671234 && lojaComEntrega.retiradaLng === -57.892346
-    && lojaComEntrega.retiradaEndereco === 'Rua do Sítio, 100, Zona Rural' && lojaComEntrega.freteGratis === false && lojaComEntrega.pixChave === '+5565999849257',
+    && lojaComEntrega.retiradaEndereco === 'Rua do Sítio, 100, Zona Rural' && lojaComEntrega.freteGratis === false && lojaComEntrega.pixChave === '+5565999849257'
+    && lojaComEntrega.entregaDas === '08:00' && lojaComEntrega.entregaAte === '12:00' && lojaComEntrega.retiradaDas === '14:00' && lojaComEntrega.retiradaAte === '18:00',
   'entrega e retirada na página: ' + JSON.stringify(lojaComEntrega),
 );
 
@@ -290,6 +298,7 @@ await cliente.esperar('Ovos caipira');
 await cliente.esperar('R$ 30,00 / ');
 await cliente.esperar('Retirando no local, não paga entrega');
 await cliente.esperar('Entregas e retiradas às quartas e aos sábados');
+await cliente.esperar('Horário: entrega das 08:00 às 12:00; retirada das 14:00 às 18:00.');
 await cliente.page.locator('.loja-produto', { hasText: 'Ovos caipira' }).locator('.loja-foto img').waitFor();
 await cliente.esperar('Ovos de galinhas soltas.');
 conferir(!(await cliente.page.locator('.loja-produto', { hasText: 'Mel' }).locator('.loja-foto').count()), 'Mel aparece com foto sem ter');
@@ -314,7 +323,7 @@ await cliente.esperar('R$ 37,00');
 conferir(!(await cliente.page.getByLabel('Bairro').count()), 'pediu o endereço de novo em vez de usar o do cadastro');
 passo('cliente escolhe a data entre os dias de entrega (quartas e sábados)');
 await cliente.esperar('Quando entregar?');
-const datas = cliente.page.locator('.datas-entrega button');
+const datas = cliente.page.locator('.datas-entrega:not(.horarios) button');
 conferir((await datas.count()) === 6, 'deveria mostrar 6 datas de entrega');
 conferir((await datas.first().getAttribute('aria-checked')) === 'true', 'a primeira data de entrega deveria vir marcada');
 const diasDasDatas = await datas.locator('span').allInnerTexts();
@@ -322,6 +331,12 @@ conferir(diasDasDatas.every((d) => /^(Hoje|Amanhã|Quarta|Sábado)$/.test(d)), '
 conferir(!(await cliente.page.getByLabel('Para quando?').count()), 'com dias de entrega, não deveria deixar escolher qualquer data');
 await datas.nth(1).click();
 const dataEscolhida = await datas.nth(1).locator('strong').innerText();
+passo('cliente escolhe a partir de que horas quer receber, dentro do horário de entrega');
+await cliente.esperar('Entregar a partir das');
+const horas = cliente.page.locator('.horarios button');
+conferir((await horas.allInnerTexts()).join(' ') === '08:00 09:00 10:00 11:00', 'horários de entrega: ' + (await horas.allInnerTexts()));
+conferir((await horas.first().getAttribute('aria-checked')) === 'true', 'o primeiro horário deveria vir marcado');
+await cliente.page.click('.horarios >> text=10:00');
 await cliente.page.getByLabel('Observação').fill('Deixar no portão');
 await cliente.page.click('text=Enviar pedido');
 await cliente.esperar('Escolha como vai pagar.');
@@ -351,6 +366,8 @@ await cliente.esperar('Pagar com Pix: R$ 37,00');
 const zap = await cliente.page.locator('a:has-text("Avisar o sítio no WhatsApp")').getAttribute('href');
 const [primeiroPedido] = await docsDoServidor('pedidos');
 conferir(primeiroPedido?.dataDesejada?.slice(5).split('-').reverse().join('/') === dataEscolhida, `data de entrega do pedido: ${primeiroPedido?.dataDesejada}, escolhida ${dataEscolhida}`);
+conferir(primeiroPedido?.obs?.split('\n')[1] === 'Horário: a partir das 10:00', 'horário no pedido: ' + primeiroPedido?.obs);
+conferir(decodeURIComponent(zap).includes('a partir das 10:00'), 'horário na mensagem para o sítio: ' + decodeURIComponent(zap));
 conferir(zap.includes('5519977776666') && decodeURIComponent(zap).includes('Rua das Flores') && decodeURIComponent(zap).includes('Pagamento: Pix'), 'link do WhatsApp para o sítio: ' + zap);
 await cliente.foto('enviado');
 await cliente.page.click('text=Ver meus pedidos');
@@ -361,6 +378,7 @@ await cliente.foto('meus-recebido-resumo');
 await cliente.page.click('.pedido-cabeca');
 await cliente.esperar('Copiar código Pix (R$ 37,00)');
 await cliente.esperar('Pagamento: Pix');
+await cliente.esperar('a partir das 10:00');
 await cliente.foto('meus-recebido-aberto');
 
 passo('pedido chega no app do dono na hora');
@@ -377,6 +395,8 @@ await dono.esperar('Ponto de referência: Portão verde');
 await dono.esperar('Total estimado: R$ 37,00');
 await dono.esperar('Pagamento: Pix');
 await dono.esperar('nº 1 ·');
+await dono.esperar('a partir das 10:00');
+conferir(!(await dono.page.locator('.cartao.pedido p.suave', { hasText: 'Horário:' }).count()), 'horário repetido na observação do pedido');
 conferir(!(await dono.page.locator('.cartao.pedido p.suave', { hasText: 'Pagamento:' }).count()), 'forma de pagamento repetida na observação do pedido');
 await dono.foto('pedido-novo');
 
@@ -389,6 +409,7 @@ await dono.esperar('Rua das Flores, 10, Centro, Campo Novo do Parecis - MT');
 conferir((await dono.page.getByLabel('Valor da entrega').inputValue()) === '5,00', 'valor da entrega não veio do pedido');
 await dono.esperar('R$ 37,00');
 conferir((await dono.page.getByLabel('Forma').inputValue()) === 'Pix', 'forma de pagamento não veio do pedido');
+conferir((await dono.page.getByLabel('A partir das (opcional)').inputValue()) === '10:00', 'horário não veio do pedido');
 const obsDaVenda = await dono.page.getByLabel('Observação').inputValue();
 conferir(obsDaVenda.includes('Deixar no portão') && !obsDaVenda.includes('Pagamento'), 'observação da venda: ' + obsDaVenda);
 await dono.foto('venda-do-pedido');
@@ -398,7 +419,7 @@ await dono.page.waitForTimeout(1500);
 let [pedido] = await docsDoServidor('pedidos');
 conferir(pedido?.status === 'confirmado' && pedido.vendaId && pedido.totalCent === 3700 && pedido.entregaCent === 500 && pedido.numero === 1, 'pedido depois da venda: ' + JSON.stringify(pedido));
 const [venda] = await docsDoServidor('vendas');
-conferir(venda?.entregaCent === 500 && venda.totalCent === 3700, 'venda com a entrega: ' + JSON.stringify(venda));
+conferir(venda?.entregaCent === 500 && venda.totalCent === 3700 && venda.entrega?.hora === '10:00' && !venda.obs?.includes('Horário'), 'venda com a entrega: ' + JSON.stringify(venda));
 const clientes = await docsDoServidor('clientes');
 conferir(clientes.length === 2 && clientes.filter((k) => k.cadastro === '19988887777').length === 1, 'clientes depois da venda: ' + JSON.stringify(clientes));
 
@@ -413,6 +434,7 @@ await cliente.foto('meus-em-separacao');
 passo('dono toca em "Saí para entregar": abre o WhatsApp com a mensagem e o pedido sai para entrega');
 await dono.page.goto(base + '#/entregas');
 await dono.esperar('Ana Souza');
+await dono.esperar('Entregar a partir das 10:00');
 const linkSaida = await dono.page.locator('a:has-text("Saí para entregar")').getAttribute('href');
 conferir(
   linkSaida.startsWith('https://wa.me/5519988887777?text=') && decodeURIComponent(linkSaida).includes('Olá, Ana! Aqui é do') && decodeURIComponent(linkSaida).includes('Saí para entregar o seu pedido nº 1'),
@@ -463,7 +485,10 @@ const mapaRetirada = await cliente.page.locator('a:has-text("Ver no mapa")').get
 conferir(mapaRetirada === 'https://maps.apple.com/?ll=-13.671234,-57.892346&q=Granja%20Longhi' || mapaRetirada.includes('-13.671234,-57.892346'), 'mapa do local de retirada: ' + mapaRetirada);
 await cliente.esperar('Quando vai retirar?');
 await cliente.esperar('Dá para retirar às quartas e aos sábados');
-const diasRetirada = await cliente.page.locator('.datas-entrega button span').allInnerTexts();
+await cliente.page.locator('.datas-entrega:not(.horarios) button').nth(1).click();
+await cliente.esperar('Retirar a partir das');
+conferir((await cliente.page.locator('.horarios button').allInnerTexts()).join(' ') === '14:00 15:00 16:00 17:00', 'horários de retirada: ' + (await cliente.page.locator('.horarios button').allInnerTexts()));
+const diasRetirada = await cliente.page.locator('.datas-entrega:not(.horarios) button span').allInnerTexts();
 conferir(diasRetirada.length === 6 && diasRetirada.every((d) => /^(Hoje|Amanhã|Quarta|Sábado)$/.test(d)), 'retirando, só os dias marcados: ' + diasRetirada);
 conferir(!(await cliente.page.getByLabel('Para quando?').count()), 'retirando, não deveria deixar escolher qualquer data');
 await cliente.page.getByRole('radio', { name: 'Dinheiro' }).click();
@@ -479,7 +504,7 @@ await cliente.esperar('Retirar em');
 conferir(!(await cliente.page.locator('text=Pagar com Pix').count()), 'mostra o Pix depois de pedir pagando em dinheiro');
 await cliente.foto('enviado-retirar');
 const comTroco = (await docsDoServidor('pedidos')).find((p) => p.entrega === 'retirar');
-conferir(/^Pagamento: Dinheiro · troco para R\$\s50,00$/.test(comTroco?.obs || ''), 'troco no pedido: ' + comTroco?.obs);
+conferir(/^Pagamento: Dinheiro · troco para R\$\s50,00\nHorário: a partir das 14:00$/.test(comTroco?.obs || ''), 'troco e horário no pedido: ' + comTroco?.obs);
 conferir([3, 6].includes(new Date(comTroco?.dataDesejada + 'T12:00').getDay()), 'retirada fora dos dias marcados: ' + comTroco?.dataDesejada);
 await dono.page.goto(base + '#/pedidos');
 await dono.esperar('Vai retirar no local', 15000);

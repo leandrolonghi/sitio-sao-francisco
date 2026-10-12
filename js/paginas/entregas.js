@@ -56,6 +56,7 @@ function CartaoEntrega({ v, h }) {
         ? html`<${Etiqueta} tipo="ok">a caminho</${Etiqueta}>`
         : html`<${Etiqueta} tipo=${atrasada ? 'erro' : quando === h ? 'atencao' : 'info'}>${atrasada ? 'atrasada · ' : ''}${dataAmigavel(quando, h)}</${Etiqueta}>`}
     </div>
+    ${v.entrega.hora ? html`<p class="suave">Entregar a partir das <strong>${v.entrega.hora}</strong></p>` : ''}
     <p class="suave">${resumoItens(v.itens)}</p>
     <p class="suave">${dinheiro(totalVenda(v))}${saldo > 0 ? html` · <span class="atencao">falta receber ${dinheiro(saldo)}</span>` : ' · paga'}</p>
     ${endereco ? html`<${EnderecoEntrega} v=${v} endereco=${endereco} />` : html`<${SemEndereco} venda=${v} />`}

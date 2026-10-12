@@ -140,7 +140,12 @@ export function alocarPagamento(abertas, valorCent) {
 export function entregasPendentes(vendas) {
   return vendas
     .filter((v) => v.entrega && !v.entrega.feita && !v.cancelada)
-    .sort((a, b) => (a.entrega.data || a.data).localeCompare(b.entrega.data || b.data) || (a.criadoEm || 0) - (b.criadoEm || 0));
+    .sort(
+      (a, b) =>
+        (a.entrega.data || a.data).localeCompare(b.entrega.data || b.data) ||
+        (a.entrega.hora || '').localeCompare(b.entrega.hora || '') ||
+        (a.criadoEm || 0) - (b.criadoEm || 0),
+    );
 }
 
 // Entregas feitas a partir de uma data, das mais novas para as mais antigas.

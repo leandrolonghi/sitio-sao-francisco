@@ -13,7 +13,8 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 - **Pix no pedido**: o cliente escolhe como vai pagar (Pix, dinheiro ou cartão); no Pix, copia o código
   "Pix Copia e Cola" com o valor do pedido e cola no app do banco. A chave fica em Ajustes
 - **Entrega e retirada** (em Ajustes): valor da entrega, promoção de frete grátis, frete grátis a partir de um
-  valor, dias da semana em que o sítio entrega e o local de retirada (endereço e ponto no mapa)
+  valor, dias da semana em que o sítio entrega, horário de entrega e de retirada e o local de retirada (endereço
+  e ponto no mapa)
 - **Pedidos numerados e acompanhados**: o cliente vê o pedido "Em separação" quando vira venda e "Saiu para
   entrega" quando o sítio toca em **Saí para entregar** (abre o WhatsApp com a mensagem pronta para o cliente)
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
@@ -79,7 +80,10 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
   de um valor dos itens (`freteGratisAcimaCent`, que não conta durante a promoção), dias de entrega
   (`diasEntrega`, 0 = domingo) e local de retirada (`retiradaEndereco`, `retiradaLat`, `retiradaLng`). A tela
   inicial da página avisa o frete grátis e os dias; ao finalizar, com dias marcados o cliente só escolhe uma das
-  próximas datas desses dias, para entregar ou para retirar no local. Na venda, o valor da entrega vem preenchido (do pedido,
+  próximas datas desses dias, para entregar ou para retirar no local. Com o horário de entrega e o de retirada
+  (`entregaDas`/`entregaAte`, `retiradaDas`/`retiradaAte`), o cliente escolhe "a partir das" (de hora em hora,
+  dentro do horário; para hoje, só os que não passaram). O horário vai numa linha da observação do pedido
+  ("Horário: a partir das 14:00", sem mudar as regras) e passa para a venda (`entrega.hora`). Na venda, o valor da entrega vem preenchido (do pedido,
   ou o padrão) e dá para mudar.
 - A **foto do produto** é escolhida no cadastro do produto (câmera ou galeria) e o app a reduz (até 600 pixels,
   JPEG, uns 100 KB). Ela fica no próprio banco, na coleção `fotos` (um documento por produto), e não no Firebase

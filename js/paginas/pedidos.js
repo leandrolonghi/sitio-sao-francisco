@@ -5,7 +5,7 @@ import { dinheiro, qtd, hoje, addDias, dataAmigavel, dataBR, formatarTelefone, l
 import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, Interruptor, Texto, Campo, CampoDinheiro, avisar, confirmar, ir } from '../ui.js';
 import {
   INFO_LOJA, STATUS_PEDIDO, DIAS_DA_SEMANA, separarPagamento, nomeDoPedido, diasDeEntrega, textoDiasDeEntrega, freteGratisAPartir, linkDaRetirada, textoOuNulo,
-  horarioDe, textoHorario,
+  horarioDe, textoHorario, videoDaCamera, camerasDe, MAX_CAMERAS,
 } from '../loja-comum.js';
 import { ehIOS } from '../estado.js';
 import { lerChavePix } from '../pix.js';
@@ -244,7 +244,10 @@ export function AjustesPagina() {
       <${Interruptor} rotulo="Receber pedidos pela página" dica="Desligado, a página avisa que não está recebendo pedidos" valor=${aberta} onChange=${setAberta} />
     </div>
     <${Texto} rotulo="WhatsApp do sítio" valor=${whatsapp} onChange=${setWhatsapp} tipo="tel" placeholder="(19) 99999-9999" dica="Depois de pedir, o cliente pode te avisar por aqui" />
-    <${Lista}><${Linha} icone="truck" titulo="Entrega e retirada" sub=${resumoEntrega(info)} href="#/pedidos/entrega" /></${Lista}>
+    <${Lista}>
+      <${Linha} icone="truck" titulo="Entrega e retirada" sub=${resumoEntrega(info)} href="#/pedidos/entrega" />
+      <${Linha} icone="video" titulo="Câmeras ao vivo" sub=${resumoCameras(info)} href="#/pedidos/cameras" />
+    </${Lista}>
     <${Secao} titulo="Produtos que aparecem na página">
       ${produtos.length
         ? html`<div class="cartao interruptores">
@@ -384,6 +387,80 @@ export function AjustesEntrega() {
         </div>
       </div>
     </${Secao}>
+  </${Tela}>`;
+}
+
+// ---------- Câmeras ao vivo ----------
+
+const resumoCameras = (info) => {
+  const n = camerasDe(info).length;
+  return n ? plural(n, 'câmera', 'câmeras') + ' na página' : 'nenhuma: a aba Câmeras não aparece';
+};
+
+// Como o link vai aparecer na página (enquanto a pessoa cola).
+function dicaDoLink(link) {
+  if (!link.trim()) return 'Do YouTube: o link do canal (youtube.com/channel/UC…) ou o de uma transmissão.';
+  const v = videoDaCamera(link);
+  if (v.erro) return v.erro;
+  if (v.canal) return 'Certo: a página mostra a transmissão que estiver no ar neste canal.';
+  if (v.embed) return 'Certo: a página mostra esta transmissão. Se ela acabar e você começar outra, cole o link novo.';
+  return 'Não é do YouTube: na página vira um botão que abre este link.';
+}
+
+// Câmeras ao vivo: o sítio cola o link da transmissão de cada câmera e a página de pedidos mostra na aba
+// Câmeras (fica no _loja do catálogo, em cameras: [{ nome, link }]). Sem câmera, a aba não aparece.
+export function AjustesCameras() {
+  const info = infoLoja();
+  const [cameras, setCameras] = useState(() => {
+    const salvas = (info.cameras || []).map((c) => ({ nome: c.nome || '', link: c.link || '' }));
+    return salvas.length ? salvas : [{ nome: '', link: '' }];
+  });
+  const [erros, setErros] = useState({});
+
+  const mudar = (i, campo) => (v) => {
+    setCameras((cs) => cs.map((c, j) => (j === i ? { ...c, [campo]: v } : c)));
+    setErros((e) => ({ ...e, [i]: '' }));
+  };
+  const tirar = (i) => {
+    setCameras((cs) => cs.filter((_, j) => j !== i));
+    setErros({});
+  };
+  const salvar = () => {
+    const er = {};
+    cameras.forEach((c, i) => {
+      if (c.nome.trim() || c.link.trim()) er[i] = videoDaCamera(c.link).erro || '';
+    });
+    setErros(er);
+    if (Object.values(er).some(Boolean)) return avisar('Confira o link das câmeras.', 'erro');
+    const lista = cameras.filter((c) => c.link.trim()).map((c) => ({ nome: textoOuNulo(c.nome) || '', link: c.link.trim() }));
+    salvarInfoLoja({ cameras: lista });
+    avisar(lista.length ? 'Câmeras salvas: já aparecem na página' : 'Sem câmeras: a aba Câmeras saiu da página');
+  };
+
+  return html`<${Tela} titulo="Câmeras ao vivo" voltarPara="/pedidos/pagina" classe="formulario" rodape=${html`<${Botao} icone="check" onClick=${salvar}>Salvar</${Botao}>`}>
+    <div class="faixa"><${Icone} nome="video" /><div class="faixa-corpo">
+      <p>Os clientes veem a produção ao vivo na aba <strong>Câmeras</strong> da página de pedidos.</p>
+      <p>A câmera transmite ao vivo no YouTube (de graça) e você cola aqui o link. O melhor é o link do canal: ele não muda quando a transmissão recomeça.</p>
+    </div></div>
+    ${cameras.map(
+      (c, i) => html`<div class="cartao formulario" key=${i}>
+        <${Texto} rotulo=${`Câmera ${i + 1}: nome`} valor=${c.nome} onChange=${mudar(i, 'nome')} placeholder="Ex.: Galinheiro" />
+        <${Texto}
+          rotulo="Link da transmissão"
+          tipo="url"
+          valor=${c.link}
+          onChange=${mudar(i, 'link')}
+          placeholder="https://www.youtube.com/channel/UC…"
+          erro=${erros[i]}
+          dica=${dicaDoLink(c.link)}
+        />
+        <div class="botoes"><${Botao} tipo="secundario" icone="trash-2" onClick=${() => tirar(i)}>Tirar esta câmera</${Botao}></div>
+      </div>`,
+    )}
+    ${cameras.length < MAX_CAMERAS
+      ? html`<div class="botoes"><${Botao} tipo="secundario" icone="plus" onClick=${() => setCameras((cs) => [...cs, { nome: '', link: '' }])}>Adicionar câmera</${Botao}></div>`
+      : ''}
+    ${camerasDe(info).length ? html`<div class="botoes"><${Botao} tipo="secundario" icone="share" href=${linkDaPagina() + '#/cameras'}>Ver como os clientes veem</${Botao}></div>` : ''}
   </${Tela}>`;
 }
 

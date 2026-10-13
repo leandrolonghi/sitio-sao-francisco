@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   telefoneNormal, mesmoTelefone, nomeNormal, emailDoCliente, senhaDoCliente, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco, nomeDoPedido,
   taxaDaEntrega, freteGratisAPartir, diasDeEntrega, textoDiasDeEntrega, proximasEntregas, linkDaRetirada, horarioDe, horariosDe, textoHorario,
+  videoDaCamera, camerasDe, MAX_CAMERAS,
 } from '../js/loja-comum.js';
 
 test('telefone sem formatação, sem 55 e sem zero na frente', () => {
@@ -80,4 +81,49 @@ test('horário de entrega e de retirada: "a partir das" de hora em hora', () => 
   assert.deepEqual(horariosDe(horarioDe(info), '11:30'), []);
   assert.deepEqual(horariosDe(null), []);
   assert.equal(textoHorario(horarioDe(info)), 'das 08:00 às 12:00');
+});
+
+test('câmeras: link do canal ou da transmissão do YouTube vira vídeo dentro da página', () => {
+  const canal = 'UCabcdefghijklmnopqrstuv';
+  const aoVivo = `https://www.youtube.com/embed/live_stream?channel=${canal}&playsinline=1&rel=0`;
+  for (const link of [canal, `https://www.youtube.com/channel/${canal}`, `youtube.com/channel/${canal}/live`, `https://m.youtube.com/channel/${canal}?si=x`]) {
+    assert.deepEqual(videoDaCamera(link), { embed: aoVivo, assistir: `https://www.youtube.com/channel/${canal}/live`, canal: true }, link);
+  }
+  const video = 'https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0';
+  for (const link of [
+    'https://youtu.be/dQw4w9WgXcQ?si=abc',
+    'https://www.youtube.com/live/dQw4w9WgXcQ?si=x',
+    'https://m.youtube.com/watch?v=dQw4w9WgXcQ&feature=share',
+    ' https://www.youtube.com/embed/dQw4w9WgXcQ ',
+    'https://youtube.com/shorts/dQw4w9WgXcQ',
+  ]) {
+    assert.deepEqual(videoDaCamera(link), { embed: video, assistir: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }, link);
+  }
+  assert.deepEqual(videoDaCamera('https://exemplo.com.br/camera'), { url: 'https://exemplo.com.br/camera' }, 'outro site: botão');
+  assert.match(videoDaCamera('https://www.youtube.com/@granjalonghi/live').erro, /canal pelo nome/);
+  assert.match(videoDaCamera('http://192.168.0.10:8080/video').erro, /internet do sítio/);
+  assert.match(videoDaCamera('https://www.youtube.com/feed/library').erro, /não é de uma transmissão/);
+  assert.ok(videoDaCamera('').erro);
+  assert.ok(videoDaCamera('abc').erro);
+  assert.ok(videoDaCamera('javascript:alert(1)').erro);
+});
+
+test('câmeras da página: só as que têm link que serve, com nome', () => {
+  const info = {
+    cameras: [
+      { nome: 'Galinheiro', link: 'https://youtu.be/dQw4w9WgXcQ' },
+      { nome: 'Errada', link: 'https://www.youtube.com/@granja' },
+      { nome: '', link: 'https://exemplo.com.br/cam' },
+    ],
+  };
+  assert.deepEqual(
+    camerasDe(info).map((c) => [c.nome, !!c.embed, c.url || null]),
+    [
+      ['Galinheiro', true, null],
+      ['Câmera 2', false, 'https://exemplo.com.br/cam'],
+    ],
+  );
+  assert.deepEqual(camerasDe({}), []);
+  const muitas = { cameras: Array.from({ length: 9 }, () => ({ nome: 'x', link: 'https://youtu.be/dQw4w9WgXcQ' })) };
+  assert.equal(camerasDe(muitas).length, MAX_CAMERAS);
 });

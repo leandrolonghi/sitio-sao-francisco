@@ -106,6 +106,8 @@ async function aparelho(nome) {
   });
   // links do WhatsApp abrem uma página em branco (sem sair para a internet)
   await ctx.route('https://wa.me/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>WhatsApp</p>' }));
+  // vídeos do YouTube (câmeras ao vivo) também: só confere o endereço
+  await ctx.route('https://www.youtube.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>YouTube</p>' }));
   const page = await ctx.newPage();
   telas.push([nome, page]);
   page.on('pageerror', (e) => erros.push(`${nome} pageerror: ${e.message}`));
@@ -749,6 +751,79 @@ await cliente.foto('promocao-frete-gratis');
 await cliente.page.click('text=Continuar');
 await cliente.esperar('Entregar (grátis)');
 await cliente.page.click('[aria-label="Voltar"]');
+
+passo('dono coloca câmeras ao vivo na página e o cliente vê na aba Câmeras');
+const CANAL = 'UCabcdefghijklmnopqrstuv';
+await dono.page.goto(base + '#/pedidos/pagina');
+await dono.esperar('nenhuma: a aba Câmeras não aparece');
+await dono.page.click('text=Câmeras ao vivo');
+await dono.esperar('Os clientes veem a produção ao vivo');
+const linkCamera = (i) => dono.page.getByLabel('Link da transmissão').nth(i);
+await dono.page.getByLabel('Câmera 1: nome').fill('Galinheiro');
+await linkCamera(0).fill('https://www.youtube.com/@granjalonghi');
+await dono.esperar('Esse é o link do canal pelo nome');
+await dono.page.click('.rodape-acao >> text=Salvar');
+await dono.esperar('Confira o link das câmeras.');
+await linkCamera(0).fill('https://www.youtube.com/channel/' + CANAL);
+await dono.esperar('a página mostra a transmissão que estiver no ar neste canal');
+await dono.page.click('text=Adicionar câmera');
+await dono.page.getByLabel('Câmera 2: nome').fill('Horta');
+await linkCamera(1).fill('https://youtu.be/dQw4w9WgXcQ?si=abc');
+await dono.page.click('text=Adicionar câmera');
+await dono.page.getByLabel('Câmera 3: nome').fill('Pomar');
+await linkCamera(2).fill('exemplo.com.br/camera');
+await dono.esperar('Não é do YouTube');
+await dono.foto('cameras');
+await dono.page.click('.rodape-acao >> text=Salvar');
+await dono.esperar('Câmeras salvas');
+await dono.page.waitForTimeout(1500);
+const lojaComCameras = (await docsDoServidor('catalogo')).find((d) => d.id === '_loja');
+conferir(
+  JSON.stringify(lojaComCameras?.cameras) === JSON.stringify([
+    { nome: 'Galinheiro', link: 'https://www.youtube.com/channel/' + CANAL },
+    { nome: 'Horta', link: 'https://youtu.be/dQw4w9WgXcQ?si=abc' },
+    { nome: 'Pomar', link: 'exemplo.com.br/camera' },
+  ]),
+  'câmeras no servidor: ' + JSON.stringify(lojaComCameras?.cameras),
+);
+await dono.page.goto(base + '#/pedidos/pagina');
+await dono.esperar('3 câmeras na página');
+await cliente.page.goto(pagina);
+await cliente.page.click('.abas >> text=Câmeras');
+await cliente.esperar('Veja a produção');
+const fontes = await cliente.page.locator('.camera-video iframe').evaluateAll((fs) => fs.map((f) => f.src));
+conferir(
+  JSON.stringify(fontes) === JSON.stringify([`https://www.youtube.com/embed/live_stream?channel=${CANAL}&playsinline=1&rel=0`, 'https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0']),
+  'vídeos das câmeras: ' + JSON.stringify(fontes),
+);
+conferir((await cliente.page.locator('a', { hasText: 'Ver esta câmera' }).getAttribute('href')) === 'https://exemplo.com.br/camera', 'botão da câmera de fora do YouTube');
+const noYouTube = await cliente.page.locator('a.camera-abrir').evaluateAll((as) => as.map((a) => a.href));
+conferir(
+  JSON.stringify(noYouTube) === JSON.stringify([`https://www.youtube.com/channel/${CANAL}/live`, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ']),
+  'links "Abrir no YouTube": ' + JSON.stringify(noYouTube),
+);
+await cliente.foto('cameras');
+
+passo('quem não entrou também vê as câmeras, pelo botão na tela de entrar');
+const visitante = await aparelho('visitante');
+await visitante.page.goto(pagina);
+await visitante.esperar('Faça seu pedido');
+await visitante.page.click('text=Ver a produção ao vivo');
+await visitante.esperar('Galinheiro');
+conferir((await visitante.page.locator('.camera-video iframe').count()) === 2, 'visitante deveria ver os 2 vídeos');
+await visitante.foto('cameras-sem-entrar');
+await visitante.page.click('text=Fazer um pedido');
+await visitante.esperar('Faça seu pedido');
+
+passo('sem câmeras, a aba some');
+await dono.page.goto(base + '#/pedidos/cameras');
+for (let i = 0; i < 3; i++) await dono.page.locator('text=Tirar esta câmera').first().click();
+await dono.page.click('.rodape-acao >> text=Salvar');
+await dono.esperar('Sem câmeras: a aba Câmeras saiu da página');
+await dono.page.waitForTimeout(1500);
+await cliente.page.goto(pagina);
+await cliente.esperar('Olá, Pedro!');
+conferir(!(await cliente.page.locator('.abas >> text=Câmeras').count()), 'sem câmeras, a aba Câmeras não deveria aparecer');
 
 passo('dono fecha a página e o cliente vê o aviso');
 await dono.page.goto(base + '#/pedidos/pagina');

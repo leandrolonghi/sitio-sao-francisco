@@ -12,7 +12,7 @@ import { ListaEstoque, LancarMovimento, EstoqueProduto, ListaProdutos, FormProdu
 import { Relatorios } from './paginas/relatorios.js';
 import { Ajustes, Acesso, AcessoPessoa } from './paginas/ajustes.js';
 import { Entregas } from './paginas/entregas.js';
-import { Pedidos, AjustesPagina, AjustesEntrega, pedidosNovos, acompanharPaginaDePedidos } from './paginas/pedidos.js';
+import { Pedidos, AjustesPagina, AjustesEntrega, AjustesCameras, pedidosNovos, acompanharPaginaDePedidos } from './paginas/pedidos.js';
 import { entregasPendentes } from './calc.js';
 import { acompanharCadastros } from './cadastros.js';
 import { NaoEncontrado, SemPermissao } from './paginas/comum.js';
@@ -63,6 +63,7 @@ function escolherTela({ caminho, partes, query }) {
     case 'pedidos':
       if (b === 'pagina') return [html`<${AjustesPagina} />`, false];
       if (b === 'entrega') return [html`<${AjustesEntrega} />`, false];
+      if (b === 'cameras') return [html`<${AjustesCameras} />`, false];
       return [html`<${Pedidos} />`, true];
     case 'clientes':
     case 'fornecedores':

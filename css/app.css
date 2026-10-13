@@ -431,6 +431,10 @@ div.linha:active { background: transparent; }
 .campos-horario input { flex: 1; min-width: 0; width: 100%; }
 .rodape-frete { margin: -4px 0 8px; font-size: 14px; color: var(--verde); font-weight: 600; }
 .vazio-cartao { width: 100%; text-align: left; color: var(--texto); margin-bottom: 16px; }
+/* câmeras ao vivo na página de pedidos (vídeo do YouTube em 16:9) */
+.camera-video { position: relative; aspect-ratio: 16 / 9; border-radius: var(--raio); overflow: hidden; background: #000; }
+.camera-abrir { display: inline-block; margin-top: 8px; font-size: 14px; font-weight: 600; }
+.camera-video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
 .vazio .cartao-endereco .icone { margin: 2px 0 0; opacity: 1; }
 
 /* Meus pedidos: resumo que abre ao tocar */

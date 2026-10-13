@@ -16,7 +16,7 @@ import {
 import {
   INFO_LOJA, STATUS_PEDIDO, FORMAS_NA_PAGINA, CIDADE_ATENDIDA, DIAS_DA_SEMANA, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco,
   textoOuNulo, linhaPagamento, linhaHorario, separarPagamento, valorParaPix, nomeDoPedido, taxaDaEntrega, freteGratisAPartir, diasDeEntrega,
-  textoDiasDeEntrega, proximasEntregas, linkDaRetirada, horarioDe, horariosDe, textoHorario,
+  textoDiasDeEntrega, proximasEntregas, linkDaRetirada, horarioDe, horariosDe, textoHorario, camerasDe,
 } from './loja-comum.js';
 import { codigoPix, descreverChave, chaveParaColar } from './pix.js';
 import { VERSAO } from './versao.js';
@@ -417,7 +417,8 @@ function Entrar() {
         ? html`<button class="link" onClick=${() => trocarModo('entrar')}>Já tenho cadastro</button>`
         : html`<p class="suave" style="margin:0">Primeira vez aqui?</p>
             <${Botao} tipo="secundario" icone="circle-user-round" onClick=${() => trocarModo('cadastro')}>Fazer cadastro</${Botao}>
-            <button class="link" onClick=${() => trocarModo('esqueci')}>Esqueci a senha</button>`}
+            <button class="link" onClick=${() => trocarModo('esqueci')}>Esqueci a senha</button>
+            ${camerasDe(loja.info).length ? html`<${Botao} tipo="secundario" icone="video" href="#/cameras">Ver a produção ao vivo</${Botao}>` : ''}`}
     </div>
   </div>`;
 }
@@ -1005,22 +1006,63 @@ function MeuCadastro() {
   </${Tela}>`;
 }
 
-function Abas({ partes }) {
+// ---------- Câmeras ----------
+
+// Câmeras ao vivo da produção. O sítio cadastra no app; o vídeo vem do YouTube (não toca sozinho, para não
+// gastar a internet do cliente sem ele querer).
+// Abre também sem entrar (fora): o vídeo já é público no YouTube, e assim dá para mandar o link para alguém.
+function Cameras({ fora }) {
+  const { info, produtos } = useLoja();
+  const cameras = camerasDe(info);
+  return html`<${Tela}
+    titulo="Câmeras ao vivo"
+    voltarPara=${fora ? '/' : undefined}
+    rodape=${fora ? html`<${Botao} icone="shopping-cart" href="#/">Fazer um pedido</${Botao}>` : null}
+  >
+    ${produtos === null
+      ? html`<p class="suave centro">Carregando as câmeras…</p>`
+      : !cameras.length
+        ? html`<${Vazio} icone="video" texto="O sítio não está mostrando câmeras agora." />`
+        : html`<p class="suave">Veja a produção do ${nomeSitio()} em tempo real. Toque no vídeo para assistir.</p>
+            ${cameras.map(
+              (c, i) => html`<${Secao} key=${i} titulo=${c.nome} classe="camera">
+                ${c.embed
+                  ? html`<div class="camera-video">
+                      <iframe
+                        src=${c.embed}
+                        title=${c.nome}
+                        allow="encrypted-media; picture-in-picture; fullscreen"
+                        allowfullscreen
+                        loading="lazy"
+                        referrerpolicy="strict-origin-when-cross-origin"
+                      ></iframe>
+                    </div>
+                    <a class="camera-abrir" href=${c.assistir} target="_blank" rel="noopener">Abrir no YouTube</a>`
+                  : html`<${Botao} tipo="secundario" icone="video" href=${c.url}>Ver esta câmera</${Botao}>`}
+              </${Secao}>`,
+            )}
+            <p class="campo-dica">Se o vídeo não abrir aqui, toque em “Abrir no YouTube”. Se aparecer “vídeo indisponível”, a câmera está desligada agora.</p>`}
+  </${Tela}>`;
+}
+
+function Abas({ partes, cameras }) {
   const abas = [
     ['', 'shopping-cart', 'Fazer pedido'],
+    ...(cameras ? [['cameras', 'video', 'Câmeras']] : []),
     ['meus', 'receipt', 'Meus pedidos'],
     ['cadastro', 'circle-user-round', 'Meu cadastro'],
   ];
-  const atual = ['meus', 'cadastro'].includes(partes[0]) ? partes[0] : '';
+  const atual = ['meus', 'cadastro', 'cameras'].includes(partes[0]) ? partes[0] : '';
   return html`<nav class="abas">
     ${abas.map(([c, i, r]) => html`<a href=${'#/' + c} class=${atual === c ? 'ativa' : ''}><${Icone} nome=${i} tam=${24} /><span>${r}</span></a>`)}
   </nav>`;
 }
 
 function Pagina() {
-  const { sessao, cliente, lendoCadastro, erroCadastro } = useLoja();
+  const { sessao, cliente, lendoCadastro, erroCadastro, info } = useLoja();
   const rota = useRota();
   useEffect(() => window.scrollTo(0, 0), [rota.caminho]);
+  if (rota.partes[0] === 'cameras' && !(sessao && cliente)) return html`<div class="sem-barra"><${Cameras} fora /></div>`;
   if (!sessao) return html`<${Entrar} />`;
   if (!cliente) {
     if (erroCadastro) return html`<${ErroCadastro} />`;
@@ -1034,8 +1076,10 @@ function Pagina() {
   else if (a === 'enviado' && b) tela = html`<${Enviado} id=${b} />`;
   else if (a === 'meus') tela = html`<${MeusPedidos} />`;
   else if (a === 'cadastro') tela = html`<${MeuCadastro} />`;
+  else if (a === 'cameras') tela = html`<${Cameras} />`;
   else tela = html`<${Catalogo} />`;
-  return html`<div class=${comAbas ? 'com-barra' : 'sem-barra'} key=${rota.caminho}>${tela}${comAbas ? html`<${Abas} partes=${rota.partes} />` : ''}</div>`;
+  const abas = html`<${Abas} partes=${rota.partes} cameras=${camerasDe(info).length > 0} />`;
+  return html`<div class=${comAbas ? 'com-barra' : 'sem-barra'} key=${rota.caminho}>${tela}${comAbas ? abas : ''}</div>`;
 }
 
 // ---------- Início ----------

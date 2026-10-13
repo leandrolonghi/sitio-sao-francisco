@@ -156,3 +156,61 @@ export function linkDaRetirada(info, ios = false) {
   }
   return info?.retiradaEndereco ? linkMapa(info.retiradaEndereco, ios) : null;
 }
+
+// ---------- Câmeras ao vivo ----------
+// O sítio cadastra no app (tela Câmeras ao vivo): _loja.cameras = [{ nome, link }]. Na página de pedidos, a aba
+// Câmeras mostra cada uma. Transmissão do YouTube aparece dentro da página (sem custo: o vídeo vem do YouTube);
+// outro link vira um botão que abre a câmera fora da página.
+export const MAX_CAMERAS = 6;
+const ID_VIDEO = /^[\w-]{11}$/;
+const ID_CANAL = /^UC[\w-]{22}$/;
+const HOSTS_YOUTUBE = ['youtube.com', 'youtube-nocookie.com', 'youtu.be'];
+// endereço da rede de casa (ex.: 192.168.0.10, o da câmera no Wi-Fi): de fora ninguém abre
+const REDE_DE_CASA = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/;
+// sem autoplay (não gasta a internet do cliente sem ele tocar no vídeo); playsinline: no iPhone toca na página
+const EXTRAS = 'playsinline=1&rel=0';
+// assistir: o mesmo vídeo no YouTube, para quando o canal ainda não pode mostrar a transmissão em outro site
+const doCanal = (id) => ({ embed: `https://www.youtube.com/embed/live_stream?channel=${id}&${EXTRAS}`, assistir: `https://www.youtube.com/channel/${id}/live`, canal: true });
+const doVideo = (id) => ({ embed: `https://www.youtube.com/embed/${id}?${EXTRAS}`, assistir: `https://www.youtube.com/watch?v=${id}` });
+
+function paraUrl(t) {
+  try {
+    const url = new URL(/^[a-z][\w+.-]*:/i.test(t) ? t : 'https://' + t);
+    return /^https?:$/.test(url.protocol) && url.hostname.includes('.') ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+// Como a câmera aparece: { embed, assistir, canal } (dentro da página), { url } (botão para abrir) ou { erro }.
+// Do YouTube vale o link do canal (youtube.com/channel/UC…, mostra a transmissão que estiver no ar) ou o link
+// de uma transmissão (youtu.be/…, youtube.com/live/…, youtube.com/watch?v=…).
+export function videoDaCamera(link) {
+  const t = (link || '').trim();
+  if (!t) return { erro: 'Cole o link da transmissão.' };
+  if (ID_CANAL.test(t)) return doCanal(t);
+  const url = paraUrl(t);
+  if (!url) return { erro: 'Esse link não parece certo. Copie de novo o link da transmissão.' };
+  const host = url.hostname.toLowerCase().replace(/^(www|m)\./, '');
+  if (REDE_DE_CASA.test(url.hostname)) return { erro: 'Esse link só abre na internet do sítio. O cliente, de fora, não consegue ver.' };
+  if (!HOSTS_YOUTUBE.includes(host)) return { url: url.href };
+  const [p0, p1] = url.pathname.split('/').filter(Boolean);
+  if (host === 'youtu.be') return ID_VIDEO.test(p0 || '') ? doVideo(p0) : { erro: 'Esse link do YouTube está incompleto. Copie de novo o link da transmissão.' };
+  if (p0 === 'channel' && ID_CANAL.test(p1 || '')) return doCanal(p1);
+  if (p0 === 'embed' && p1 === 'live_stream' && ID_CANAL.test(url.searchParams.get('channel') || '')) return doCanal(url.searchParams.get('channel'));
+  if (p0 === 'watch' && ID_VIDEO.test(url.searchParams.get('v') || '')) return doVideo(url.searchParams.get('v'));
+  if (['live', 'embed', 'shorts', 'v'].includes(p0) && ID_VIDEO.test(p1 || '')) return doVideo(p1);
+  if (p0?.startsWith('@') || p0 === 'c' || p0 === 'user') {
+    return { erro: 'Esse é o link do canal pelo nome. Use o link com o código do canal (youtube.com/channel/UC…) ou o link da transmissão.' };
+  }
+  return { erro: 'Esse link do YouTube não é de uma transmissão nem de um canal.' };
+}
+
+// Câmeras que a página mostra: só as que têm link que serve, na ordem do app.
+export function camerasDe(info) {
+  return (Array.isArray(info?.cameras) ? info.cameras : [])
+    .map((c) => ({ nome: (c?.nome || '').trim(), ...videoDaCamera(c?.link) }))
+    .filter((c) => !c.erro)
+    .slice(0, MAX_CAMERAS)
+    .map((c, i) => ({ ...c, nome: c.nome || `Câmera ${i + 1}` }));
+}

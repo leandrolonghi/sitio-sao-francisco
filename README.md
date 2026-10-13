@@ -15,6 +15,8 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 - **Entrega e retirada** (em Ajustes): valor da entrega, promoção de frete grátis, frete grátis a partir de um
   valor, dias da semana em que o sítio entrega, horário de entrega e de retirada e o local de retirada (endereço
   e ponto no mapa)
+- **Câmeras ao vivo** (em Pedidos dos clientes → Produtos e ajustes da página): os clientes veem a produção
+  em tempo real na aba **Câmeras** da página de pedidos, com a transmissão ao vivo do YouTube (de graça)
 - **Pedidos numerados e acompanhados**: o cliente vê o pedido "Em separação" quando vira venda e "Saiu para
   entrega" quando o sítio toca em **Saí para entregar** (abre o WhatsApp com a mensagem pronta para o cliente)
 - **Despesas** por categoria e fornecedor, com contas a pagar e vencimento
@@ -85,6 +87,21 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
   dentro do horário; para hoje, só os que não passaram). O horário vai numa linha da observação do pedido
   ("Horário: a partir das 14:00", sem mudar as regras) e passa para a venda (`entrega.hora`). Na venda, o valor da entrega vem preenchido (do pedido,
   ou o padrão) e dá para mudar.
+- **Câmeras ao vivo**: em **Produtos e ajustes da página → Câmeras ao vivo** o sítio coloca o nome e o link de
+  cada câmera (até 6), que ficam em `_loja.cameras` (`[{ nome, link }]`, sem mudar as regras). Com alguma câmera,
+  a página ganha a aba **Câmeras** (também abre sem entrar, em `pedido/#/cameras`, e a tela de entrar tem o botão
+  "Ver a produção ao vivo"). A transmissão é do YouTube, que serve o vídeo de graça: o link do canal
+  (`youtube.com/channel/UC…`) mostra a transmissão pública que estiver no ar e não muda quando ela recomeça; o
+  link de uma transmissão (`youtu.be/…`, `youtube.com/live/…`) mostra só aquela. A transmissão precisa ser
+  pública (ou não listada, pelo link dela) e com "Permitir incorporação" ligado. O link do canal pelo nome
+  (`youtube.com/@…`) não serve, porque o YouTube só mostra a transmissão do canal pelo código. Link de outro
+  site vira um botão "Ver esta câmera"; endereço da rede de casa (192.168…) é recusado. Mostrar transmissão ao
+  vivo em outro site é um "recurso avançado" do YouTube (telefone confirmado e verificação por documento ou vídeo,
+  ou histórico do canal); por isso cada vídeo tem também o link "Abrir no YouTube". Para transmitir sem
+  computador, o jeito grátis é um celular parado na produção com o app **Larix Broadcaster** e a chave de
+  transmissão do YouTube (Criar → Transmitir ao vivo → Transmissão). O vídeo não toca sozinho, para não gastar
+  a internet do cliente. Isso fica em `videoDaCamera` (`js/loja-comum.js`), `AjustesCameras`
+  (`js/paginas/pedidos.js`) e `Cameras` (`js/loja.js`).
 - A **foto do produto** é escolhida no cadastro do produto (câmera ou galeria) e o app a reduz (até 600 pixels,
   JPEG, uns 100 KB). Ela fica no próprio banco, na coleção `fotos` (um documento por produto), e não no Firebase
   Storage, que em projetos novos só funciona no plano pago. A página guarda as fotos no celular do cliente e só

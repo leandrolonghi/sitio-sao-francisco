@@ -187,7 +187,11 @@ export function DetalhePessoa({ col, id }) {
     `;
   }
 
+  // foto de perfil que o cliente colocou na página de pedidos
+  const foto = col === 'clientes' && p.cadastro ? banco.get('cadastros', p.cadastro)?.foto : null;
+
   return html`<${Tela} titulo=${p.nome} voltarPara=${'/' + col} direita=${html`<${BotaoTopo} icone="pencil" rotulo="Editar" href=${`#/${col}/${p.id}/editar`} />`}>
+    ${foto ? html`<div class="perfil"><span class="avatar grande"><img src=${foto} alt=${'Foto de ' + p.nome} /></span></div>` : ''}
     ${tel || endereco || p.obs || p.cpf
       ? html`<div class="cartao" style="margin-bottom:16px">
           ${tel ? html`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">

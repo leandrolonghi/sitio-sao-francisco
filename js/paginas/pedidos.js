@@ -2,10 +2,10 @@
 import { html, useState } from '../vendor/preact.js';
 import { banco } from '../db.js';
 import { dinheiro, qtd, hoje, addDias, dataAmigavel, dataBR, formatarTelefone, linkWhatsApp, plural, ordenarPorNome } from '../util.js';
-import { Tela, Secao, Lista, Linha, Vazio, Botao, Etiqueta, Icone, Interruptor, Texto, Campo, CampoDinheiro, avisar, confirmar, ir } from '../ui.js';
+import { Tela, Secao, Lista, Linha, Vazio, Botao, BotaoTopo, Etiqueta, Icone, Interruptor, Texto, Campo, CampoDinheiro, EntradaDinheiro, Segmentado, avisar, confirmar, ir, trocar } from '../ui.js';
 import {
   INFO_LOJA, STATUS_PEDIDO, DIAS_DA_SEMANA, separarPagamento, nomeDoPedido, diasDeEntrega, textoDiasDeEntrega, freteGratisAPartir, linkDaRetirada, textoOuNulo,
-  horarioDe, textoHorario, videoDaCamera, camerasDe, MAX_CAMERAS,
+  horarioDe, textoHorario, videoDaCamera, camerasDe, MAX_CAMERAS, bairrosDe, nomeNormal, telefoneNormal,
 } from '../loja-comum.js';
 import { ehIOS } from '../estado.js';
 import { lerChavePix } from '../pix.js';
@@ -112,102 +112,132 @@ function ItensPedido({ p }) {
   return html`<ul class="itens-pedido">
     ${(p.itens || []).map((i) => html`<li><span>${qtd(i.qtd)} ${i.unidade || ''} ${i.nome}</span>${i.precoCent != null ? html`<span>${dinheiro(Math.round(i.qtd * i.precoCent))}</span>` : ''}</li>`)}
     ${p.entregaCent ? html`<li><span>Entrega</span><span>${dinheiro(p.entregaCent)}</span></li>` : ''}
+    ${p.totalCent ? html`<li><strong>${p.status === 'novo' ? 'Total estimado' : 'Total'}</strong><strong>${dinheiro(p.totalCent)}</strong></li>` : ''}
   </ul>`;
 }
 
-function CartaoPedido({ p }) {
-  const { forma, detalhe, hora, obs } = separarPagamento(p.obs);
+const resumoDosItens = (p) => (p.itens || []).map((i) => `${qtd(i.qtd)} ${i.unidade || ''} ${i.nome}`.replace(/\s+/g, ' ')).join(', ');
+// "Entregar · qua, 14/10 · a partir das 08:00"
+const quandoDoPedido = (p) =>
+  [p.entrega === 'entregar' ? 'Entregar' : 'Retirar', p.dataDesejada ? dataAmigavel(p.dataDesejada) : '', separarPagamento(p.obs).hora ? 'a partir das ' + separarPagamento(p.obs).hora : '']
+    .filter(Boolean)
+    .join(' · ');
+const fotoDoTelefone = (tel) => banco.get('cadastros', telefoneNormal(tel))?.foto || null;
+
+// Pedido resumido (nome, valor, quando e itens). Tocando, abre o resto: telefone, endereço, pagamento,
+// observação e as outras ações. A ação principal fica sempre à mão.
+function CartaoPedido({ p, aberto, onAbrir, principal, children }) {
+  const { forma, detalhe, obs } = separarPagamento(p.obs);
+  const foto = fotoDoTelefone(p.telefone);
+  const s = STATUS_PEDIDO[p.status] || STATUS_PEDIDO.novo;
+  return html`<div class=${'cartao pedido pedido-resumo' + (aberto ? ' aberto' : '')}>
+    <button type="button" class="pedido-cabeca" aria-expanded=${aberto} onClick=${onAbrir}>
+      ${foto ? html`<span class="avatar pequeno"><img src=${foto} alt="" /></span>` : ''}
+      <span class="pedido-cabeca-texto">
+        <span class="pedido-cabeca-linha">
+          <strong>${p.nome}</strong>
+          <span>${p.totalCent ? dinheiro(p.totalCent) : ''}</span>
+        </span>
+        <span class="suave">${[p.numero ? 'nº ' + p.numero : '', quandoDoPedido(p)].filter(Boolean).join(' · ')}</span>
+        ${aberto ? '' : html`<span class="suave pedido-itens-curto">${resumoDosItens(p)}</span>`}
+      </span>
+      <${Icone} nome="chevron-down" tam=${20} classe="pedido-seta" />
+    </button>
+    <div class="pedido-detalhes">
+      ${aberto
+        ? html`<${ItensPedido} p=${p} />
+            ${p.status !== 'novo' ? html`<p><${Etiqueta} tipo=${s.tipo}>${s.nome}</${Etiqueta}></p>` : ''}
+            <p class="entrega-endereco"><${Icone} nome="phone" tam=${18} /><span>${formatarTelefone(p.telefone)} · feito ${dataAmigavel(diaDe(p.criadoEm))} às ${horaDe(p.criadoEm)}</span></p>
+            ${p.entrega === 'entregar' && p.endereco ? html`<p class="entrega-endereco"><${Icone} nome="map-pin" tam=${18} /><span>${p.endereco}</span></p>` : ''}
+            ${forma ? html`<p class="entrega-endereco"><${Icone} nome="wallet" tam=${18} /><span>Pagamento: ${forma}${detalhe ? ` (${detalhe})` : ''}</span></p>` : ''}
+            ${obs ? html`<p class="suave" style="white-space:pre-line">“${obs}”</p>` : ''}`
+        : ''}
+      <div class="botoes">
+        ${principal}
+        ${aberto ? children : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function PedidoNovo({ p, aberto, onAbrir }) {
   const virarVenda = () => ir(`/vendas/nova?pedido=${p.id}&cliente=${clienteDoPedido(p)}`);
   const recusar = () => {
     if (!confirmar(`Recusar o pedido de ${p.nome}? Ele vai aparecer como "não aceito" para o cliente.`)) return;
     mudarPedido(p.id, { status: 'recusado' });
     avisar('Pedido recusado');
   };
-  return html`<div class="cartao pedido">
-    <div class="entrega-topo">
-      <strong>${p.nome}</strong>
-      <span class="suave pequeno">${p.numero ? 'nº ' + p.numero + ' · ' : ''}${dataAmigavel(diaDe(p.criadoEm))} ${horaDe(p.criadoEm)}</span>
-    </div>
-    <p class="suave">${formatarTelefone(p.telefone)}</p>
-    <${ItensPedido} p=${p} />
-    ${p.totalCent ? html`<p><strong>Total estimado: ${dinheiro(p.totalCent)}</strong></p>` : ''}
-    <p class="entrega-endereco">
-      <${Icone} nome=${p.entrega === 'entregar' ? 'truck' : 'house'} tam=${18} />
-      <span>${p.entrega === 'entregar' ? 'Entregar' + (p.endereco ? ': ' + p.endereco : '') : 'Vai retirar no local'}${p.dataDesejada ? ` · para ${dataBR(p.dataDesejada)}` : ''}${hora ? ` · a partir das ${hora}` : ''}</span>
-    </p>
-    ${forma ? html`<p class="entrega-endereco"><${Icone} nome="wallet" tam=${18} /><span>Pagamento: ${forma}${detalhe ? ` (${detalhe})` : ''}</span></p>` : ''}
-    ${obs ? html`<p class="suave" style="white-space:pre-line">“${obs}”</p>` : ''}
-    <div class="botoes">
-      <${Botao} icone="shopping-cart" onClick=${virarVenda}>Transformar em venda</${Botao}>
-      <${Botao} tipo="secundario" icone="message-circle" href=${linkWhatsApp(p.telefone)}>Conversar no WhatsApp</${Botao}>
-      <${Botao} tipo="perigo" icone="ban" onClick=${recusar}>Recusar</${Botao}>
-    </div>
-  </div>`;
+  return html`<${CartaoPedido} p=${p} aberto=${aberto} onAbrir=${onAbrir} principal=${html`<${Botao} icone="shopping-cart" onClick=${virarVenda}>Transformar em venda</${Botao}>`}>
+    <${Botao} tipo="secundario" icone="message-circle" href=${linkWhatsApp(p.telefone)}>Conversar no WhatsApp</${Botao}>
+    <${Botao} tipo="perigo" icone="ban" onClick=${recusar}>Recusar</${Botao}>
+  </${CartaoPedido}>`;
 }
 
-export function Pedidos() {
-  const todos = [...banco.lista('pedidos')].sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0));
-  const novos = todos.filter((p) => p.status === 'novo').reverse();
-  const confirmados = todos.filter((p) => p.status === 'confirmado' || p.status === 'em_rota');
-  const limite = addDias(hoje(), -14);
-  const antigos = todos.filter((p) => ['entregue', 'recusado', 'cancelado'].includes(p.status) && diaDe(p.atualizadoEm || p.criadoEm) >= limite);
-  const link = linkDaPagina();
-  const compartilhar = () => {
-    const texto = `Faça seu pedido no ${nomeDoSitio()}: ${link}`;
-    if (navigator.share) navigator.share({ text: texto }).catch(() => {});
-    else window.open(linkWhatsApp('', texto), '_blank');
-  };
-  const concluir = (p) => {
+function PedidoEmAndamento({ p, aberto, onAbrir }) {
+  const concluir = () => {
     mudarPedido(p.id, { status: 'entregue' });
     const v = p.vendaId && banco.get('vendas', p.vendaId);
     if (v?.entrega && !v.entrega.feita) banco.salvar('vendas', { ...v, entrega: { ...v.entrega, feita: true, feitaEm: hoje() } });
     avisar('Pedido concluído');
   };
+  const feito = html`<${Botao} tipo="secundario" icone="check" onClick=${concluir}>${p.entrega === 'entregar' ? 'Foi entregue' : 'Cliente retirou'}</${Botao}>`;
+  return html`<${CartaoPedido}
+    p=${p}
+    aberto=${aberto}
+    onAbrir=${onAbrir}
+    principal=${p.entrega === 'entregar' ? html`<${BotaoSaida} telefone=${p.telefone} nome=${p.nome} pedido=${p} aCaminho=${p.status === 'em_rota'} />${feito}` : feito}
+  >
+    <${Botao} tipo="secundario" icone="message-circle" href=${linkWhatsApp(p.telefone)}>Conversar no WhatsApp</${Botao}>
+    ${p.vendaId ? html`<${Botao} tipo="secundario" icone="receipt" href=${'#/vendas/' + p.vendaId}>Ver a venda</${Botao}>` : ''}
+  </${CartaoPedido}>`;
+}
 
-  return html`<${Tela} titulo="Pedidos" voltarPara="/mais">
+// Pedidos da página em três abas: novos (para virar venda), em andamento (em separação ou saindo para entrega)
+// e concluídos (últimos 14 dias). O link da página e os ajustes ficam no alto.
+export function Pedidos({ query = {} }) {
+  const [aberto, setAberto] = useState(null);
+  const todos = [...banco.lista('pedidos')].sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0));
+  const novos = todos.filter((p) => p.status === 'novo').reverse();
+  const andamento = todos.filter((p) => p.status === 'confirmado' || p.status === 'em_rota');
+  const limite = addDias(hoje(), -14);
+  const concluidos = todos.filter((p) => ['entregue', 'recusado', 'cancelado'].includes(p.status) && diaDe(p.atualizadoEm || p.criadoEm) >= limite);
+  const abas = [
+    ['novos', novos.length ? `Novos (${novos.length})` : 'Novos'],
+    ['andamento', andamento.length ? `Andamento (${andamento.length})` : 'Andamento'],
+    ['concluidos', 'Concluídos'],
+  ];
+  const aba = abas.some(([v]) => v === query.aba) ? query.aba : !novos.length && andamento.length ? 'andamento' : 'novos';
+  const link = linkDaPagina();
+  const fechada = infoLoja().aberta === false;
+  const compartilhar = () => {
+    const texto = `Faça seu pedido no ${nomeDoSitio()}: ${link}`;
+    if (navigator.share) navigator.share({ text: texto }).catch(() => {});
+    else window.open(linkWhatsApp('', texto), '_blank');
+  };
+  const abrir = (id) => () => setAberto((a) => (a === id ? null : id));
+
+  return html`<${Tela} titulo="Pedidos" voltarPara="/mais" direita=${html`<${BotaoTopo} icone="settings" rotulo="Produtos e ajustes da página" href="#/pedidos/pagina" />`}>
     <${AvisoRegras} />
-    <div class="cartao" style="margin-bottom:18px">
-      <p style="margin:0 0 4px"><strong>Página de pedidos</strong>${infoLoja().aberta === false ? html` <${Etiqueta} tipo="erro">fechada</${Etiqueta}>` : ''}</p>
-      <p class="suave pequeno" style="margin:0 0 12px;word-break:break-all">${link}</p>
-      <div class="botoes">
-        <${Botao} icone="share" onClick=${compartilhar}>Mandar o link para clientes</${Botao}>
-        <${Botao} tipo="secundario" icone="settings" href="#/pedidos/pagina">Produtos e ajustes da página</${Botao}>
-      </div>
+    <div class="pedidos-topo">
+      <span class="suave pequeno">Página de pedidos ${fechada ? html`<${Etiqueta} tipo="erro">fechada</${Etiqueta}>` : html`<${Etiqueta} tipo="ok">aberta</${Etiqueta}>`}</span>
+      <button type="button" class="link" onClick=${compartilhar}><${Icone} nome="share" tam=${18} /> Mandar o link</button>
     </div>
+    <div class="abas-topo"><${Segmentado} valor=${aba} onChange=${(v) => trocar('/pedidos?aba=' + v)} opcoes=${abas} /></div>
 
-    ${novos.length
-      ? html`<${Secao} titulo=${plural(novos.length, 'pedido novo', 'pedidos novos')}>${novos.map((p) => html`<${CartaoPedido} key=${p.id} p=${p} />`)}</${Secao}>`
-      : html`<${Vazio} icone="shopping-cart" texto="Nenhum pedido novo. Os pedidos que os clientes fizerem pela página aparecem aqui." />`}
-
-    ${confirmados.length
-      ? html`<${Secao} titulo="Em separação, falta entregar">
-          ${confirmados.map(
-            (p) => html`<div class="cartao pedido" key=${p.id}>
-              <div class="entrega-topo">
-                <strong>${p.nome}</strong>
-                <${Etiqueta} tipo=${p.status === 'em_rota' ? 'info' : 'ok'}>${STATUS_PEDIDO[p.status].nome}</${Etiqueta}>
-              </div>
-              <p class="suave">${[
-                p.numero ? 'nº ' + p.numero : '',
-                p.entrega === 'entregar' ? 'Entregar' : 'Vai retirar no local',
-                p.dataDesejada ? dataAmigavel(p.dataDesejada) : '',
-                separarPagamento(p.obs).hora ? 'a partir das ' + separarPagamento(p.obs).hora : '',
-                p.totalCent ? dinheiro(p.totalCent) : '',
-              ].filter(Boolean).join(' · ')}</p>
-              <div class="botoes">
-                ${p.entrega === 'entregar' ? html`<${BotaoSaida} telefone=${p.telefone} nome=${p.nome} pedido=${p} aCaminho=${p.status === 'em_rota'} />` : ''}
-                <${Botao} tipo="secundario" icone="check" onClick=${() => concluir(p)}>${p.entrega === 'entregar' ? 'Foi entregue' : 'Cliente retirou'}</${Botao}>
-              </div>
-              ${p.vendaId ? html`<a class="entrega-ver" href=${'#/vendas/' + p.vendaId}>Ver a venda</a>` : ''}
-            </div>`,
-          )}
-        </${Secao}>`
+    ${aba === 'novos'
+      ? novos.length
+        ? novos.map((p) => html`<${PedidoNovo} key=${p.id} p=${p} aberto=${aberto === p.id} onAbrir=${abrir(p.id)} />`)
+        : html`<${Vazio} icone="shopping-cart" texto="Nenhum pedido novo. Os pedidos que os clientes fizerem pela página aparecem aqui." />`
       : ''}
-
-    ${antigos.length
-      ? html`<${Secao} titulo="Últimos 14 dias">
-          <${Lista}>
-            ${antigos.map(
+    ${aba === 'andamento'
+      ? andamento.length
+        ? andamento.map((p) => html`<${PedidoEmAndamento} key=${p.id} p=${p} aberto=${aberto === p.id} onAbrir=${abrir(p.id)} />`)
+        : html`<${Vazio} icone="truck" texto="Nenhum pedido em separação ou saindo para entrega." />`
+      : ''}
+    ${aba === 'concluidos'
+      ? concluidos.length
+        ? html`<${Lista}>
+            ${concluidos.map(
               (p) => html`<${Linha}
                 key=${p.id}
                 titulo=${p.nome}
@@ -217,7 +247,8 @@ export function Pedidos() {
               />`,
             )}
           </${Lista}>
-        </${Secao}>`
+          <p class="campo-dica">Pedidos dos últimos 14 dias.</p>`
+        : html`<${Vazio} icone="check" texto="Nenhum pedido concluído nos últimos 14 dias." />`
       : ''}
   </${Tela}>`;
 }
@@ -346,8 +377,9 @@ export function AjustesEntrega() {
   };
   const mapa = ponto ? linkDaRetirada({ retiradaLat: ponto.lat, retiradaLng: ponto.lng, nome: nomeDoSitio() }, ehIOS()) : null;
 
-  return html`<${Tela} titulo="Entrega e retirada" voltarPara="/ajustes" classe="formulario" rodape=${html`<${Botao} icone="check" onClick=${salvar}>Salvar</${Botao}>`}>
-    <${CampoDinheiro} rotulo="Valor da entrega" valor=${taxa} onChange=${setTaxa} dica="Soma no pedido quando o cliente escolhe Entregar e vem preenchido nas vendas com entrega (dá para mudar em cada venda). Em branco, não cobra." />
+  return html`<${Tela} titulo="Entrega e retirada" voltarPara="/ajustes?aba=entregas" classe="formulario" rodape=${html`<${Botao} icone="check" onClick=${salvar}>Salvar</${Botao}>`}>
+    <${CampoDinheiro} rotulo="Valor da entrega" valor=${taxa} onChange=${setTaxa} dica="Valor padrão: soma no pedido quando o cliente escolhe Entregar e vem preenchido nas vendas com entrega (dá para mudar em cada venda). Em branco, não cobra." />
+    <${Lista}><${Linha} icone="map-pin" titulo="Frete por bairro" sub=${resumoBairros(info)} href="#/pedidos/bairros" /></${Lista}>
     <div class="cartao">
       <${Interruptor} rotulo="Promoção: frete grátis" dica="Ligado, nenhuma entrega é cobrada e a página de pedidos avisa os clientes" valor=${promocao} onChange=${setPromocao} />
     </div>
@@ -461,6 +493,62 @@ export function AjustesCameras() {
       ? html`<div class="botoes"><${Botao} tipo="secundario" icone="plus" onClick=${() => setCameras((cs) => [...cs, { nome: '', link: '' }])}>Adicionar câmera</${Botao}></div>`
       : ''}
     ${camerasDe(info).length ? html`<div class="botoes"><${Botao} tipo="secundario" icone="share" href=${linkDaPagina() + '#/cameras'}>Ver como os clientes veem</${Botao}></div>` : ''}
+  </${Tela}>`;
+}
+
+// ---------- Frete por bairro ----------
+
+function resumoBairros(info) {
+  const lista = bairrosDe(info);
+  const proprios = lista.filter((b) => b.taxaCent != null).length;
+  return `${plural(lista.length, 'bairro', 'bairros')} · ${proprios ? plural(proprios, 'com valor próprio', 'com valor próprio') : 'todos com o valor padrão'}`;
+}
+
+const porNome = (a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+
+// Frete por bairro: os bairros que o cliente escolhe na página de pedidos e o valor da entrega em cada um
+// (em branco, vale o valor padrão da tela Entrega e retirada). Fica no _loja do catálogo, em bairros.
+export function AjustesBairros() {
+  const info = infoLoja();
+  const [lista, setLista] = useState(() => bairrosDe(info).map((b) => ({ nome: b.nome, taxaCent: b.taxaCent ?? null })));
+  const [novo, setNovo] = useState('');
+  const [busca, setBusca] = useState('');
+  const padrao = info.taxaEntregaCent > 0 ? dinheiro(info.taxaEntregaCent) : 'sem valor';
+
+  const mudar = (nome, v) => setLista((l) => l.map((b) => (b.nome === nome ? { ...b, taxaCent: v ?? null } : b)));
+  const tirar = (nome) => confirmar(`Tirar o bairro ${nome} da lista?`) && setLista((l) => l.filter((b) => b.nome !== nome));
+  const adicionar = () => {
+    const nome = textoOuNulo(novo);
+    if (!nome) return avisar('Digite o nome do bairro.', 'erro');
+    if (lista.some((b) => nomeNormal(b.nome) === nomeNormal(nome))) return avisar('Esse bairro já está na lista.', 'erro');
+    setLista((l) => [...l, { nome, taxaCent: null }].sort(porNome));
+    setNovo('');
+    avisar(`${nome} entrou na lista. Toque em Salvar.`);
+  };
+  const salvar = () => {
+    if (!lista.length) return avisar('Deixe pelo menos um bairro na lista.', 'erro');
+    salvarInfoLoja({ bairros: lista.map((b) => ({ nome: b.nome, taxaCent: b.taxaCent != null && b.taxaCent >= 0 ? b.taxaCent : null })) });
+    avisar('Frete por bairro salvo');
+  };
+  const mostrar = busca.trim() ? lista.filter((b) => nomeNormal(b.nome).includes(nomeNormal(busca))) : lista;
+
+  return html`<${Tela} titulo="Frete por bairro" voltarPara="/pedidos/entrega" classe="formulario" rodape=${html`<${Botao} icone="check" onClick=${salvar}>Salvar</${Botao}>`}>
+    <p class="suave" style="margin:0">Na página de pedidos, o cliente escolhe o bairro nesta lista e paga a entrega do bairro. Em branco, vale o valor padrão (${padrao}). Com 0, a entrega no bairro é grátis.</p>
+    <${Texto} rotulo="Procurar bairro" valor=${busca} onChange=${setBusca} placeholder="Digite parte do nome" />
+    <div class="cartao lista-bairros">
+      ${mostrar.map(
+        (b) => html`<div class="linha-bairro" key=${b.nome}>
+          <span>${b.nome}</span>
+          <${EntradaDinheiro} rotulo=${'Entrega no ' + b.nome} valor=${b.taxaCent} onChange=${(v) => mudar(b.nome, v)} placeholder=${info.taxaEntregaCent > 0 ? dinheiro(info.taxaEntregaCent).replace(/^R\$\s*/, '') : '0,00'} />
+          <button type="button" class="botao-remover" aria-label=${'Tirar ' + b.nome} onClick=${() => tirar(b.nome)}><${Icone} nome="x" tam=${18} /></button>
+        </div>`,
+      )}
+      ${!mostrar.length ? html`<p class="suave" style="margin:0">Nenhum bairro com esse nome.</p>` : ''}
+    </div>
+    <div class="cartao formulario">
+      <${Texto} rotulo="Bairro que não está na lista" valor=${novo} onChange=${setNovo} placeholder="Ex.: Residencial Novo" />
+      <${Botao} tipo="secundario" icone="plus" onClick=${adicionar}>Adicionar bairro</${Botao}>
+    </div>
   </${Tela}>`;
 }
 

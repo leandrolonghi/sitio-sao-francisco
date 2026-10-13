@@ -107,50 +107,11 @@ function enderecoInicial(cliente, pedido) {
   return doCliente;
 }
 
-export function FormVenda({ id, query = {} }) {
-  const existente = id ? banco.get('vendas', id) : null;
-  // venda feita a partir de um pedido da página de pedidos
-  const [doPedido] = useState(() => (!existente ? dadosDoPedido(query.pedido) : null));
-  const pedido = doPedido?.pedido;
-  // o cliente pode cancelar pela página enquanto o pedido não vira venda
-  const pedidoCancelado = pedido && banco.get('pedidos', pedido.id)?.status === 'cancelado';
-  const [data, setData] = useState(existente?.data || hoje());
-  const [clienteId, setClienteId] = useState(existente?.clienteId || query.cliente || '');
-  const [itens, setItens] = useState(() => (existente?.itens || doPedido?.itens || []).map((i) => ({ ...i, chave: novoId() })));
-  const [descontoCent, setDesconto] = useState(existente?.descontoCent || null);
-  const [verDesconto, setVerDesconto] = useState(!!existente?.descontoCent);
-  const [comoPaga, setComoPaga] = useState('agora');
-  const [forma, setForma] = useState(FORMAS_PAGAMENTO.includes(doPedido?.forma) ? doPedido.forma : ultimaForma());
-  const [recebidoCent, setRecebido] = useState(null);
-  const [obs, setObs] = useState(existente?.obs || doPedido?.obs || '');
-  const [vencimento, setVencimento] = useState(existente?.vencimento || '');
-  const [entregar, setEntregar] = useState(existente ? !!existente.entrega : pedido?.entrega === 'entregar');
-  const [dataEntrega, setDataEntrega] = useState(existente?.entrega?.data || existente?.data || (pedido?.dataDesejada > hoje() ? pedido.dataDesejada : hoje()));
-  const [horaEntrega, setHoraEntrega] = useState(existente ? existente.entrega?.hora || '' : doPedido?.hora || '');
-  const [end, setEnd] = useState(() => enderecoInicial(banco.get('clientes', existente?.clienteId || query.cliente), pedido));
-  const [mudandoEndereco, setMudandoEndereco] = useState(false);
-  // valor da entrega: o da venda, o do pedido ou o padrão dos ajustes da página de pedidos
-  const [entregaCent, setEntregaCent] = useState(() => (existente ? existente.entregaCent : pedido ? pedido.entregaCent : taxaDaEntrega(infoLoja(), 0)) || null);
-  const [erros, setErros] = useState({});
-  if (id && !existente) return html`<${NaoEncontrado} voltarPara="/vendas" />`;
-
+// Produtos para escolher (botões) e os itens com quantidade e preço. Usado na venda e no orçamento.
+// Cada item tem uma "chave" só para a tela; tire antes de salvar.
+export function EditorItens({ itens, setItens, erro }) {
   const produtos = produtosAtivos();
   const estoque = estoqueAtual();
-  const total = totalVenda({ itens, descontoCent, entregaCent: entregar ? entregaCent : 0 });
-  const recebido = comoPaga === 'agora' ? Math.min(recebidoCent ?? total, total) : 0;
-  const falta = total - recebido;
-  const ficaDevendo = existente ? total - pagoVenda(existente) > 0 : falta > 0;
-  const escolherCliente = (v) => {
-    setClienteId(v);
-    setEnd(camposEndereco(banco.get('clientes', v)));
-    setMudandoEndereco(false);
-    setErros({ ...erros, cliente: null });
-  };
-  const mudarEndereco = (campo) => (v) => {
-    setEnd((e) => ({ ...e, [campo]: v }));
-    setErros((e) => ({ ...e, endereco: null }));
-  };
-
   const mudarItem = (chave, mudanca) => setItens((lista) => lista.map((i) => (i.chave === chave ? { ...i, ...mudanca } : i)));
   const removerItem = (chave) => setItens((lista) => lista.filter((i) => i.chave !== chave));
   const adicionar = (p) =>
@@ -160,6 +121,103 @@ export function FormVenda({ id, query = {} }) {
       return [...lista, { chave: novoId(), produtoId: p.id, nome: p.nome, unidade: p.unidade, qtd: 1, precoCent: p.precoCent ?? null }];
     });
   const adicionarAvulso = () => setItens((lista) => [...lista, { chave: novoId(), produtoId: null, nome: '', unidade: 'un', qtd: 1, precoCent: null }]);
+
+  return html`
+    <${Secao} titulo="Produtos">
+      ${produtos.length
+        ? html`<div class="chips-produtos">
+            ${produtos.map((p) => {
+              const no = itens.find((i) => i.produtoId === p.id);
+              return html`<button type="button" class=${'chip-produto' + (no ? ' no-carrinho' : '')} onClick=${() => adicionar(p)}>
+                ${p.nome}
+                <small>${p.precoCent != null ? `${dinheiro(p.precoCent)}/${p.unidade}` : p.unidade}${p.controlaEstoque ? ` · tem ${qtd(estoque.get(p.id) || 0)}` : ''}</small>
+              </button>`;
+            })}
+            <button type="button" class="chip-produto" onClick=${adicionarAvulso}>+ Outro item<small>fora da lista</small></button>
+          </div>`
+        : html`<div class="faixa"><${Icone} nome="package" /><div class="faixa-corpo"><p>Você ainda não cadastrou produtos.</p><p>${pode('produtos') ? html`<a href="#/produtos/novo">Cadastrar produto</a> ou ` : ''}<button class="link" onClick=${adicionarAvulso}>lançar item avulso</button>.</p></div></div>`}
+    </${Secao}>
+
+    ${itens.length
+      ? html`<div class="lista">
+          ${itens.map(
+            (i) => html`<div class="item-venda" key=${i.chave}>
+              <div class="item-venda-topo">
+                ${i.produtoId
+                  ? html`<strong>${i.nome}</strong>`
+                  : html`<input value=${i.nome} placeholder="Nome do item" onInput=${(e) => mudarItem(i.chave, { nome: e.target.value })} style="min-height:40px;padding:6px 10px" />`}
+                <span class="item-venda-total">${dinheiro(valorItem(i))}</span>
+                <button type="button" class="botao-remover" aria-label="Tirar item" onClick=${() => removerItem(i.chave)}><${Icone} nome="x" tam=${20} /></button>
+              </div>
+              <div class="item-venda-campos" style="grid-template-columns: auto 1fr">
+                <div class="passo">
+                  <button type="button" aria-label="Menos" onClick=${() => mudarItem(i.chave, { qtd: Math.max(0, arred3((i.qtd || 0) - 1)) })}><${Icone} nome="minus" tam=${18} /></button>
+                  <span style="width:84px"><${EntradaQtd} valor=${i.qtd} unidade=${i.unidade} onChange=${(v) => mudarItem(i.chave, { qtd: v })} /></span>
+                  <button type="button" aria-label="Mais" onClick=${() => mudarItem(i.chave, { qtd: arred3((i.qtd || 0) + 1) })}><${Icone} nome="plus" tam=${18} /></button>
+                </div>
+                <${EntradaDinheiro} valor=${i.precoCent} onChange=${(v) => mudarItem(i.chave, { precoCent: v })} placeholder="preço" />
+              </div>
+            </div>`,
+          )}
+        </div>`
+      : ''}
+    ${erro ? html`<p class="campo-dica erro">${erro}</p>` : ''}
+  `;
+}
+
+export function FormVenda({ id, query = {} }) {
+  const existente = id ? banco.get('vendas', id) : null;
+  // venda feita a partir de um pedido da página de pedidos
+  const [doPedido] = useState(() => (!existente ? dadosDoPedido(query.pedido) : null));
+  const pedido = doPedido?.pedido;
+  // ou de um orçamento que o cliente fechou
+  const [orcamento] = useState(() => (!existente && query.orcamento ? banco.get('orcamentos', query.orcamento) || null : null));
+  // o cliente pode cancelar pela página enquanto o pedido não vira venda
+  const pedidoCancelado = pedido && banco.get('pedidos', pedido.id)?.status === 'cancelado';
+  const [data, setData] = useState(existente?.data || hoje());
+  const [clienteId, setClienteId] = useState(existente?.clienteId || query.cliente || '');
+  const [itens, setItens] = useState(() => (existente?.itens || doPedido?.itens || orcamento?.itens || []).map((i) => ({ ...i, chave: novoId() })));
+  const [descontoCent, setDesconto] = useState(existente?.descontoCent || orcamento?.descontoCent || null);
+  const [verDesconto, setVerDesconto] = useState(!!(existente?.descontoCent || orcamento?.descontoCent));
+  const [comoPaga, setComoPaga] = useState('agora');
+  const [forma, setForma] = useState(FORMAS_PAGAMENTO.includes(doPedido?.forma) ? doPedido.forma : ultimaForma());
+  const [recebidoCent, setRecebido] = useState(null);
+  const [obs, setObs] = useState(existente?.obs || doPedido?.obs || orcamento?.obs || '');
+  const [vencimento, setVencimento] = useState(existente?.vencimento || '');
+  const [entregar, setEntregar] = useState(existente ? !!existente.entrega : pedido ? pedido.entrega === 'entregar' : !!orcamento?.entregaCent);
+  const [dataEntrega, setDataEntrega] = useState(existente?.entrega?.data || existente?.data || (pedido?.dataDesejada > hoje() ? pedido.dataDesejada : hoje()));
+  const [horaEntrega, setHoraEntrega] = useState(existente ? existente.entrega?.hora || '' : doPedido?.hora || '');
+  const [end, setEnd] = useState(() => enderecoInicial(banco.get('clientes', existente?.clienteId || query.cliente), pedido));
+  const [mudandoEndereco, setMudandoEndereco] = useState(false);
+  // valor da entrega: o da venda, o do pedido ou o padrão dos ajustes da página de pedidos
+  // (o padrão é o do bairro do cliente, se o sítio colocou frete por bairro)
+  const [entregaCent, setEntregaCent] = useState(
+    () =>
+      (existente
+        ? existente.entregaCent
+        : pedido
+          ? pedido.entregaCent
+          : orcamento?.entregaCent || taxaDaEntrega(infoLoja(), 0, banco.get('clientes', query.cliente)?.bairro)) || null,
+  );
+  const [erros, setErros] = useState({});
+  if (id && !existente) return html`<${NaoEncontrado} voltarPara="/vendas" />`;
+
+  const total = totalVenda({ itens, descontoCent, entregaCent: entregar ? entregaCent : 0 });
+  const recebido = comoPaga === 'agora' ? Math.min(recebidoCent ?? total, total) : 0;
+  const falta = total - recebido;
+  const ficaDevendo = existente ? total - pagoVenda(existente) > 0 : falta > 0;
+  const escolherCliente = (v) => {
+    setClienteId(v);
+    setEnd(camposEndereco(banco.get('clientes', v)));
+    if (!existente && !pedido && !orcamento) setEntregaCent(taxaDaEntrega(infoLoja(), 0, banco.get('clientes', v)?.bairro) || null);
+    setMudandoEndereco(false);
+    setErros({ ...erros, cliente: null });
+  };
+  const mudarEndereco = (campo) => (v) => {
+    setEnd((e) => ({ ...e, [campo]: v }));
+    setErros((e) => ({ ...e, endereco: null }));
+  };
+
 
   function salvar() {
     if (pedidoCancelado) return avisar('O cliente cancelou este pedido.', 'erro');
@@ -213,10 +271,12 @@ export function FormVenda({ id, query = {} }) {
           }
         : null,
       pedidoId: existente?.pedidoId || pedido?.id || null,
+      orcamentoId: existente?.orcamentoId || orcamento?.id || null,
       cancelada: existente?.cancelada || false,
     });
     if (pedido) mudarPedido(pedido.id, { status: 'confirmado', vendaId: doc.id, totalCent: total });
     else if (existente?.pedidoId && banco.get('pedidos', existente.pedidoId)?.totalCent !== total) mudarPedido(existente.pedidoId, { totalCent: total });
+    if (orcamento) banco.salvar('orcamentos', { ...banco.get('orcamentos', orcamento.id), vendaId: doc.id });
     // atualiza o preço do produto se ainda não tinha
     for (const i of limpos) {
       const p = i.produtoId && banco.get('produtos', i.produtoId);
@@ -231,7 +291,7 @@ export function FormVenda({ id, query = {} }) {
 
   return html`<${Tela}
     titulo=${existente ? 'Editar venda' : pedido ? 'Venda do pedido' : 'Nova venda'}
-    voltarPara=${existente ? '/vendas/' + existente.id : pedido ? '/pedidos' : '/vendas'}
+    voltarPara=${existente ? '/vendas/' + existente.id : pedido ? '/pedidos' : orcamento ? '/orcamentos/' + orcamento.id : '/vendas'}
     classe="formulario"
     rodape=${html`<div>
       <div class="rodape-total"><span>Total${comoPaga === 'agora' && falta > 0 && !existente ? ` · fica devendo ${dinheiro(falta)}` : ''}</span><strong>${dinheiro(total)}</strong></div>
@@ -246,7 +306,11 @@ export function FormVenda({ id, query = {} }) {
         ? html`<div class="faixa"><${Icone} nome="shopping-cart" /><div class="faixa-corpo">
             <p>Pedido de <strong>${pedido.nome}</strong> pela página. Confira os itens e os preços e registre a venda para confirmar.</p>
           </div></div>`
-        : ''}
+        : orcamento
+          ? html`<div class="faixa"><${Icone} nome="file-text" /><div class="faixa-corpo">
+              <p>Venda do <strong>orçamento nº ${orcamento.numero}</strong>. Confira e registre a venda.</p>
+            </div></div>`
+          : ''}
     <div class="dupla">
       <${CampoData} valor=${data} onChange=${setData} />
       <${Seletor}
@@ -262,45 +326,7 @@ export function FormVenda({ id, query = {} }) {
     </div>
     ${saldoAnterior > 0 ? html`<p class="campo-dica atencao" style="margin-top:-6px">Este cliente já deve ${dinheiro(saldoAnterior)}.</p>` : ''}
 
-    <${Secao} titulo="Produtos">
-      ${produtos.length
-        ? html`<div class="chips-produtos">
-            ${produtos.map((p) => {
-              const no = itens.find((i) => i.produtoId === p.id);
-              return html`<button type="button" class=${'chip-produto' + (no ? ' no-carrinho' : '')} onClick=${() => adicionar(p)}>
-                ${p.nome}
-                <small>${p.precoCent != null ? `${dinheiro(p.precoCent)}/${p.unidade}` : p.unidade}${p.controlaEstoque ? ` · tem ${qtd(estoque.get(p.id) || 0)}` : ''}</small>
-              </button>`;
-            })}
-            <button type="button" class="chip-produto" onClick=${adicionarAvulso}>+ Outro item<small>fora da lista</small></button>
-          </div>`
-        : html`<div class="faixa"><${Icone} nome="package" /><div class="faixa-corpo"><p>Você ainda não cadastrou produtos.</p><p>${pode('produtos') ? html`<a href="#/produtos/novo">Cadastrar produto</a> ou ` : ''}<button class="link" onClick=${adicionarAvulso}>lançar item avulso</button>.</p></div></div>`}
-    </${Secao}>
-
-    ${itens.length
-      ? html`<div class="lista">
-          ${itens.map(
-            (i) => html`<div class="item-venda" key=${i.chave}>
-              <div class="item-venda-topo">
-                ${i.produtoId
-                  ? html`<strong>${i.nome}</strong>`
-                  : html`<input value=${i.nome} placeholder="Nome do item" onInput=${(e) => mudarItem(i.chave, { nome: e.target.value })} style="min-height:40px;padding:6px 10px" />`}
-                <span class="item-venda-total">${dinheiro(valorItem(i))}</span>
-                <button type="button" class="botao-remover" aria-label="Tirar item" onClick=${() => removerItem(i.chave)}><${Icone} nome="x" tam=${20} /></button>
-              </div>
-              <div class="item-venda-campos" style="grid-template-columns: auto 1fr">
-                <div class="passo">
-                  <button type="button" aria-label="Menos" onClick=${() => mudarItem(i.chave, { qtd: Math.max(0, arred3((i.qtd || 0) - 1)) })}><${Icone} nome="minus" tam=${18} /></button>
-                  <span style="width:84px"><${EntradaQtd} valor=${i.qtd} unidade=${i.unidade} onChange=${(v) => mudarItem(i.chave, { qtd: v })} /></span>
-                  <button type="button" aria-label="Mais" onClick=${() => mudarItem(i.chave, { qtd: arred3((i.qtd || 0) + 1) })}><${Icone} nome="plus" tam=${18} /></button>
-                </div>
-                <${EntradaDinheiro} valor=${i.precoCent} onChange=${(v) => mudarItem(i.chave, { precoCent: v })} placeholder="preço" />
-              </div>
-            </div>`,
-          )}
-        </div>`
-      : ''}
-    ${erros.itens ? html`<p class="campo-dica erro">${erros.itens}</p>` : ''}
+    <${EditorItens} itens=${itens} setItens=${setItens} erro=${erros.itens} />
 
     ${verDesconto
       ? html`<${CampoDinheiro} rotulo="Desconto" valor=${descontoCent} onChange=${setDesconto} />`

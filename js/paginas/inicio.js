@@ -181,6 +181,7 @@ export function Inicio() {
 
 const ITENS_MAIS = [
   ['#/pedidos', 'shopping-cart', 'Pedidos dos clientes', 'Pedidos feitos pela página de pedidos'],
+  ['#/orcamentos', 'file-text', 'Orçamentos', 'Orçamento com o logo do sítio, em PDF'],
   ['#/estoque', 'boxes', 'Estoque e produção', 'Quanto tem, produção do dia, perdas'],
   ['#/produtos', 'package', 'Produtos', 'O que o sítio vende e os preços'],
   ['#/clientes', 'users', 'Clientes'],

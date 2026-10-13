@@ -139,7 +139,8 @@ await membro.esperar('Ninguém está devendo', 20000);
 await membro.foto('sincronizado');
 
 passo('membro não pode liberar acesso para outros');
-await membro.page.goto(base + '#/ajustes');
+await membro.page.goto(base + '#/ajustes?aba=conta');
+await membro.esperar('Sua conta');
 const temAcesso = await membro.page.locator('text=Pessoas com acesso').count();
 if (temAcesso) erros.push('membro vê "Pessoas com acesso"');
 

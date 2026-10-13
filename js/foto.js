@@ -15,7 +15,8 @@ function abrirImagem(url) {
 }
 
 // Recebe o arquivo escolhido (câmera ou galeria) e devolve a foto reduzida, como texto "data:image/jpeg;base64,...".
-export async function reduzirFoto(arquivo, lado = LADO) {
+// lado e maximo: menores para a foto de perfil do cliente.
+export async function reduzirFoto(arquivo, lado = LADO, maximo = TAMANHO_MAXIMO) {
   const url = URL.createObjectURL(arquivo);
   try {
     const img = await abrirImagem(url);
@@ -29,7 +30,7 @@ export async function reduzirFoto(arquivo, lado = LADO) {
     ctx.drawImage(img, 0, 0, tela.width, tela.height);
     let qualidade = 0.75;
     let dados = tela.toDataURL('image/jpeg', qualidade);
-    while (dados.length > TAMANHO_MAXIMO && qualidade > 0.4) {
+    while (dados.length > maximo && qualidade > 0.4) {
       qualidade -= 0.1;
       dados = tela.toDataURL('image/jpeg', qualidade);
     }

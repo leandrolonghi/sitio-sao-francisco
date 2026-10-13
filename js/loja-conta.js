@@ -65,6 +65,15 @@ export function criarConta(config, emulador = false) {
   return {
     cadastrar: (telefone, pin) => comSenha('signUp', telefone, pin),
     entrar: (telefone, pin) => comSenha('signInWithPassword', telefone, pin),
+    // Troca a senha de quem acabou de entrar (o Firebase só deixa logo depois de entrar com a senha).
+    async trocarSenha(s, pin) {
+      const d = await chamar(`${raiz}identitytoolkit.googleapis.com/v1/accounts:update?key=${chave}`, {
+        idToken: s.idToken,
+        password: senhaDoCliente(pin),
+        returnSecureToken: true,
+      });
+      return sessao(s.telefone, d);
+    },
     // O token vale 1 hora; o refreshToken pega outro sem pedir a senha de novo.
     async renovar(s) {
       const d = await chamar(`${raiz}securetoken.googleapis.com/v1/token?key=${chave}`, `grant_type=refresh_token&refresh_token=${encodeURIComponent(s.refreshToken)}`);

@@ -12,10 +12,11 @@ import { ListaEstoque, LancarMovimento, EstoqueProduto, ListaProdutos, FormProdu
 import { Relatorios } from './paginas/relatorios.js';
 import { Ajustes, Acesso, AcessoPessoa } from './paginas/ajustes.js';
 import { Entregas } from './paginas/entregas.js';
-import { Pedidos, AjustesPagina, AjustesEntrega, AjustesCameras, pedidosNovos, acompanharPaginaDePedidos } from './paginas/pedidos.js';
+import { Pedidos, AjustesPagina, AjustesEntrega, AjustesCameras, AjustesBairros, pedidosNovos, acompanharPaginaDePedidos } from './paginas/pedidos.js';
 import { entregasPendentes } from './calc.js';
 import { acompanharCadastros } from './cadastros.js';
 import { NaoEncontrado, SemPermissao } from './paginas/comum.js';
+import { ListaOrcamentos, FormOrcamento, DetalheOrcamento } from './paginas/orcamentos.js';
 
 const ABAS = [
   ['/', 'house', 'Início'],
@@ -25,7 +26,7 @@ const ABAS = [
   ['/despesas', 'receipt', 'Despesas'],
   ['/mais', 'ellipsis', 'Mais'],
 ];
-const DE_MAIS = ['mais', 'estoque', 'produtos', 'clientes', 'fornecedores', 'relatorios', 'ajustes'];
+const DE_MAIS = ['mais', 'estoque', 'produtos', 'clientes', 'fornecedores', 'relatorios', 'ajustes', 'pedidos', 'orcamentos'];
 
 function Abas({ partes }) {
   const ativa = (caminho) => {
@@ -64,7 +65,12 @@ function escolherTela({ caminho, partes, query }) {
       if (b === 'pagina') return [html`<${AjustesPagina} />`, false];
       if (b === 'entrega') return [html`<${AjustesEntrega} />`, false];
       if (b === 'cameras') return [html`<${AjustesCameras} />`, false];
-      return [html`<${Pedidos} />`, true];
+      if (b === 'bairros') return [html`<${AjustesBairros} />`, false];
+      return [html`<${Pedidos} query=${query} />`, true];
+    case 'orcamentos':
+      if (!b) return [html`<${ListaOrcamentos} />`, true];
+      if (b === 'novo') return [html`<${FormOrcamento} />`, false];
+      return [editar ? html`<${FormOrcamento} id=${b} />` : html`<${DetalheOrcamento} id=${b} />`, false];
     case 'clientes':
     case 'fornecedores':
       if (!b) return [html`<${ListaPessoas} col=${a} />`, true];
@@ -87,7 +93,7 @@ function escolherTela({ caminho, partes, query }) {
       return [html`<${Mais} />`, true];
     case 'ajustes':
       if (b === 'acesso') return [c ? html`<${AcessoPessoa} email=${decodeURIComponent(c)} />` : html`<${Acesso} />`, false];
-      return [html`<${Ajustes} />`, true];
+      return [html`<${Ajustes} query=${query} />`, true];
     default:
       return [html`<${NaoEncontrado} texto="Esta página não existe." />`, false];
   }

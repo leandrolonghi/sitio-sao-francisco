@@ -1,7 +1,7 @@
 // Página de pedidos dos clientes (pedido/index.html). O cliente faz um cadastro (nome, telefone, CPF opcional,
 // endereço e uma senha de 4 números) e depois entra com telefone e senha: o endereço já vem preenchido.
 // Os pedidos chegam no app do sítio, na tela Pedidos.
-import { html, render, useState, useEffect } from './vendor/preact.js';
+import { html, render, useState, useEffect, useRef } from './vendor/preact.js';
 import { firebaseConfig } from '../config.js';
 import { conectar } from './firestore-rest.js';
 import { criarConta } from './loja-conta.js';
@@ -16,9 +16,11 @@ import {
 import {
   INFO_LOJA, STATUS_PEDIDO, FORMAS_NA_PAGINA, CIDADE_ATENDIDA, DIAS_DA_SEMANA, telefoneNormal, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco,
   textoOuNulo, linhaPagamento, linhaHorario, separarPagamento, valorParaPix, nomeDoPedido, taxaDaEntrega, freteGratisAPartir, diasDeEntrega,
-  textoDiasDeEntrega, proximasEntregas, linkDaRetirada, horarioDe, horariosDe, textoHorario, camerasDe,
+  textoDiasDeEntrega, proximasEntregas, linkDaRetirada, horarioDe, horariosDe, textoHorario, camerasDe, bairrosDe, bairroDaLista, taxaDoBairro, cobraEntrega,
 } from './loja-comum.js';
 import { codigoPix, descreverChave, chaveParaColar } from './pix.js';
+import { trancarSenha, destrancarSenha } from './recuperar.js';
+import { reduzirFoto } from './foto.js';
 import { VERSAO } from './versao.js';
 
 // ---------- Estado da página ----------
@@ -29,6 +31,7 @@ const CHAVE_CARRINHO = 'sitio.loja.carrinho';
 const CHAVE_MEUS = 'sitio.loja.meus';
 const CHAVE_FOTOS = 'sitio.loja.fotos';
 const CHAVE_RECARREGOU = 'sitio.loja.recarregou';
+const CHAVE_CPF_DEPOIS = 'sitio.loja.cpfDepois'; // telefone cujo CPF o banco ainda não aceita (regras antigas)
 
 function ler(chave, padrao) {
   try {
@@ -91,7 +94,11 @@ function useLoja() {
 const SEM_INTERNET = 'Sem internet. Tente de novo quando tiver sinal.';
 const EM_ATUALIZACAO = 'A página de pedidos está sendo atualizada pelo sítio. Tente de novo daqui a pouco.';
 
+// Senha de quem entrou agora (só na memória, nunca no celular): serve para guardar a troca de senha pelo CPF.
+let pinDaSessao = null;
+
 function sairDaConta(aviso) {
+  pinDaSessao = null;
   mudar({ sessao: null, cliente: null, carrinho: {}, meus: null, erroCadastro: '', lendoCadastro: false });
   trocar('/');
   if (aviso) avisar(aviso, 'erro');
@@ -165,6 +172,8 @@ async function lerCadastro() {
     const cad = await loja.db.ler('cadastros/' + tel);
     // o sítio pode ter apagado o cliente no app: aí o cadastro some e a pessoa preenche de novo
     if (loja.sessao?.telefone === tel) mudar({ cliente: cad?.nome && !cad.excluido ? { ...cad, id: undefined } : null });
+    // entrou com a senha agora: guarda (ou renova) a troca de senha pelo CPF
+    if (pinDaSessao && loja.cliente?.cpf) gravarRecuperacao();
   } catch (e) {
     console.error(e);
     if (loginPerdido(e)) return sairDaConta('Entre de novo com seu telefone e senha.');
@@ -182,23 +191,41 @@ async function salvarCadastro(dados) {
     cpf: soDigitos(dados.cpf) || null,
     endereco: textoOuNulo(dados.endereco),
     numero: textoOuNulo(dados.numero),
-    bairro: textoOuNulo(dados.bairro),
+    bairro: bairroDaLista(loja.info, dados.bairro)?.nome || textoOuNulo(dados.bairro), // como está na lista
     cidade: CIDADE_ATENDIDA, // por enquanto o sítio só entrega nesta cidade
     referencia: textoOuNulo(dados.referencia),
+    foto: ('foto' in dados ? dados.foto : loja.cliente?.foto) || null, // foto de perfil (opcional)
     criadoEm: loja.cliente?.criadoEm || agora,
     // sempre depois da última mudança (que pode ter sido do sítio, no app), para o app saber que é nova
     atualizadoEm: Math.max(agora, Math.min((loja.cliente?.atualizadoEm || 0) + 1, agora + 30 * 60000)),
   };
+  let completo = true;
   try {
     await loja.db.gravar('cadastros/' + doc.telefone, doc);
   } catch (e) {
     if (e.code !== 'permission-denied') throw e;
-    // regras do banco ainda sem número e CPF (o sítio publica no Firebase): grava como antes, com o número
+    // regras do banco ainda sem número, CPF e foto (o sítio publica no Firebase): grava como antes, com o número
     // junto da rua, para o cadastro não parar até lá
-    const { numero, cpf, ...antes } = doc;
+    const { numero, cpf, foto, ...antes } = doc;
     await loja.db.gravar('cadastros/' + doc.telefone, { ...antes, endereco: [doc.endereco, numero].filter(Boolean).join(', ') || null });
+    completo = false;
+    if (cpf) gravar(CHAVE_CPF_DEPOIS, doc.telefone);
   }
   mudar({ cliente: doc });
+  return completo;
+}
+
+// Guarda a senha trancada com o CPF, para o cliente trocar a senha se esquecer (veja recuperar.js).
+async function gravarRecuperacao(cpf = loja.cliente?.cpf, pin = pinDaSessao) {
+  const tel = loja.sessao?.telefone;
+  if (!tel || !pinValido(pin || '') || !cpfValido(cpf || '')) return false;
+  try {
+    await loja.db.gravar('recuperar/' + tel, await trancarSenha(tel, soDigitos(cpf), pin));
+    return true;
+  } catch (e) {
+    console.warn('Não deu para guardar a troca de senha pelo CPF', e); // regras antigas: fica para o próximo login
+    return false;
+  }
 }
 
 const maisNovoPrimeiro = (a, b) => (b.criadoEm || 0) - (a.criadoEm || 0);
@@ -234,11 +261,14 @@ const itensDoCarrinho = () =>
 
 const totalItens = (itens) => itens.reduce((s, i) => s + (i.precoCent != null ? Math.round(i.qtd * i.precoCent) : 0), 0);
 const nomeSitio = () => loja.info.nome || 'Sítio São Francisco';
+const nomesDosBairros = () => bairrosDe(loja.info).map((b) => b.nome);
 
 function mensagemDaConta(e) {
   if (e.code === 'senha-errada') return 'Telefone ou senha não conferem. Se ainda não tem cadastro, toque em “Fazer cadastro”.';
   if (e.code === 'ja-cadastrado') return 'Este telefone já tem cadastro. Entre com seu telefone e senha.';
   if (e.code === 'muitas-tentativas') return 'Muitas tentativas. Espere alguns minutos e tente de novo.';
+  if (e.code === 'cpf-errado') return 'O CPF não confere com o cadastro deste telefone.';
+  if (e.code === 'sem-recuperacao') return 'Este cadastro ainda não pode trocar a senha pelo CPF. Fale com o sítio.';
   if (e.code === 'unavailable') return SEM_INTERNET;
   if (e.code === 'permission-denied') return EM_ATUALIZACAO;
   return 'Não deu certo. Tente de novo.';
@@ -260,9 +290,9 @@ function CampoTelefone({ valor, onChange, erro }) {
   return html`<${Texto} rotulo="Telefone (WhatsApp)" valor=${valor} onChange=${onChange} tipo="tel" placeholder="(19) 99999-9999" erro=${erro} autocomplete="tel" />`;
 }
 
-function CampoSenha({ valor, onChange, erro, nova }) {
+function CampoSenha({ valor, onChange, erro, nova, rotulo }) {
   return html`<${Texto}
-    rotulo=${nova ? 'Crie uma senha de 4 números' : 'Senha (4 números)'}
+    rotulo=${rotulo || (nova ? 'Crie uma senha de 4 números' : 'Senha (4 números)')}
     valor=${valor}
     onChange=${(v) => onChange(soPin(v))}
     tipo="password"
@@ -278,19 +308,19 @@ function errosDoEndereco(d) {
   const er = {};
   if (!(d.endereco || '').trim()) er.endereco = 'Digite a rua.';
   if (!(d.numero || '').trim()) er.numero = 'Digite o número (ou s/n).';
-  if (!(d.bairro || '').trim()) er.bairro = 'Digite o bairro.';
+  if (!(d.bairro || '').trim()) er.bairro = 'Escolha o bairro.';
   return er;
 }
 
 function errosDoCadastro(d) {
   const er = {};
   if ((d.nome || '').trim().length < 2) er.nome = 'Digite seu nome.';
-  if ((d.cpf || '').trim() && !cpfValido(d.cpf)) er.cpf = 'CPF inválido. Confira os números.';
+  if (!cpfValido(d.cpf || '')) er.cpf = (d.cpf || '').trim() ? 'CPF inválido. Confira os números.' : 'Digite seu CPF.';
   return { ...er, ...errosDoEndereco(d) };
 }
 
-function CampoCpf({ valor, onChange, erro }) {
-  return html`<${Texto} rotulo="CPF (opcional)" valor=${valor} onChange=${onChange} modo="numeric" placeholder="000.000.000-00" erro=${erro} />`;
+function CampoCpf({ valor, onChange, erro, rotulo = 'CPF', dica = 'Serve para você trocar a senha se esquecer.' }) {
+  return html`<${Texto} rotulo=${rotulo} valor=${valor} onChange=${onChange} modo="numeric" placeholder="000.000.000-00" erro=${erro} dica=${dica} />`;
 }
 
 const CADASTRO_VAZIO = { nome: '', cpf: '', endereco: '', numero: '', bairro: '', cidade: CIDADE_ATENDIDA, referencia: '' };
@@ -320,6 +350,8 @@ function Entrar() {
   const [enviando, setEnviando] = useState(false);
   const trocarModo = (m) => {
     setModo(m);
+    // na troca de senha, o telefone pode vir da tela anterior; o CPF e a senha nova, não
+    if (m === 'esqueci') ['cpf', 'pin'].forEach((c) => mudarCampo(c)(''));
     setErro('');
     setErros({});
     window.scrollTo(0, 0);
@@ -342,6 +374,7 @@ function Entrar() {
     setEnviando(true);
     try {
       const sessao = await loja.conta.entrar(tel, dados.pin);
+      pinDaSessao = dados.pin;
       mudar({ sessao, cliente: null, lendoCadastro: true, meus: null });
       lerCadastro();
       carregarMeus();
@@ -370,8 +403,10 @@ function Entrar() {
         sessao = await loja.conta.entrar(tel, dados.pin).catch(() => Promise.reject(er));
       }
       loja.sessao = sessao; // o token já vale para gravar o cadastro
+      pinDaSessao = dados.pin;
       try {
         await salvarCadastro(dados);
+        await gravarRecuperacao(dados.cpf, dados.pin);
       } finally {
         mudar({ sessao, lendoCadastro: false, meus: null });
       }
@@ -387,13 +422,58 @@ function Entrar() {
     }
   };
 
+  // Esqueceu a senha: com o CPF do cadastro, cria uma senha nova e já entra.
+  const trocarSenha = async (e) => {
+    e.preventDefault();
+    const er = {};
+    const tel = telefoneNormal(dados.telefone);
+    if (tel.length < 10 || tel.length > 11) er.telefone = 'Digite o telefone com DDD.';
+    if (!cpfValido(dados.cpf || '')) er.cpf = (dados.cpf || '').trim() ? 'CPF inválido. Confira os números.' : 'Digite o CPF do seu cadastro.';
+    if (!pinValido(dados.pin)) er.pin = 'A senha tem 4 números.';
+    setErros(er);
+    if (Object.keys(er).length) return;
+    setErro('');
+    setEnviando(true);
+    try {
+      const doc = await loja.db.ler('recuperar/' + tel).catch((er2) => {
+        if (er2.code === 'permission-denied') return null; // regras antigas: ainda não dá
+        throw er2;
+      });
+      if (!doc) throw Object.assign(new Error('sem recuperação'), { code: 'sem-recuperacao' });
+      const antiga = await destrancarSenha(doc, soDigitos(dados.cpf));
+      if (!antiga) throw Object.assign(new Error('CPF errado'), { code: 'cpf-errado' });
+      const entrou = await loja.conta.entrar(tel, antiga).catch((er2) => {
+        throw er2.code === 'senha-errada' ? Object.assign(new Error('senha guardada não vale mais'), { code: 'sem-recuperacao' }) : er2;
+      });
+      const sessao = await loja.conta.trocarSenha(entrou, dados.pin);
+      pinDaSessao = dados.pin;
+      mudar({ sessao, cliente: null, lendoCadastro: true, meus: null });
+      await gravarRecuperacao(dados.cpf, dados.pin);
+      lerCadastro();
+      carregarMeus();
+      avisar('Senha trocada! Use a senha nova da próxima vez.');
+    } catch (er2) {
+      console.error(er2);
+      setErro(mensagemDaConta(er2));
+    } finally {
+      setEnviando(false);
+    }
+  };
+
   if (modo === 'esqueci') {
     return html`<div class="entrada">
-      <${Cabecalho} sub="Esqueci a senha" />
-      <div class="formulario">
-        <p style="margin:0">Para criar uma senha nova, fale com o sítio. Ele apaga o seu cadastro antigo e você faz outro com o mesmo telefone, sem perder seus pedidos.</p>
-        <${LinkWhatsAppSitio} />
-        <${Botao} tipo="secundario" onClick=${() => trocarModo('entrar')}>Voltar</${Botao}>
+      <${Cabecalho} sub="Trocar a senha" />
+      <form class="formulario" onSubmit=${trocarSenha}>
+        <p style="margin:0">Digite seu telefone e o CPF do seu cadastro, e crie uma senha nova.</p>
+        <${CampoTelefone} valor=${dados.telefone} onChange=${mudarCampo('telefone')} erro=${erros.telefone} />
+        <${CampoCpf} rotulo="CPF do cadastro" dica=${null} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />
+        <${CampoSenha} rotulo="Senha nova (4 números)" valor=${dados.pin} onChange=${mudarCampo('pin')} erro=${erros.pin} nova />
+        ${erro ? html`<div class="faixa erro" role="alert" style="margin:0"><${Icone} nome="circle-alert" /><div class="faixa-corpo"><p>${erro}</p></div></div>` : ''}
+        <${Botao} submit desativado=${enviando}>${enviando ? 'Conferindo…' : 'Trocar a senha'}</${Botao}>
+      </form>
+      <div class="entrada-links">
+        <button class="link" onClick=${() => trocarModo('entrar')}>Voltar</button>
+        ${erro ? html`<${LinkWhatsAppSitio} />` : ''}
       </div>
     </div>`;
   }
@@ -406,7 +486,7 @@ function Entrar() {
       <${CampoTelefone} valor=${dados.telefone} onChange=${mudarCampo('telefone')} erro=${erros.telefone} />
       ${ehCadastro
         ? html`<${CampoCpf} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />
-            <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} />`
+            <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} bairros=${nomesDosBairros()} />`
         : ''}
       <${CampoSenha} valor=${dados.pin} onChange=${mudarCampo('pin')} erro=${erros.pin} nova=${ehCadastro} />
       ${erro ? html`<div class="faixa erro" role="alert" style="margin:0"><${Icone} nome="circle-alert" /><div class="faixa-corpo"><p>${erro}</p></div></div>` : ''}
@@ -436,6 +516,7 @@ function CompletarCadastro() {
     setEnviando(true);
     try {
       await salvarCadastro(dados);
+      await gravarRecuperacao(dados.cpf);
     } catch (er2) {
       console.error(er2);
       avisar(mensagemDaConta(er2), 'erro');
@@ -449,8 +530,67 @@ function CompletarCadastro() {
       <p class="suave" style="margin:0">Telefone: <strong>${formatarTelefone(sessao.telefone)}</strong></p>
       <${Texto} rotulo="Seu nome" valor=${dados.nome} onChange=${mudarCampo('nome')} erro=${erros.nome} autocomplete="name" />
       <${CampoCpf} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />
-      <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} />
+      <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} bairros=${nomesDosBairros()} />
       <${Botao} submit desativado=${enviando}>${enviando ? 'Salvando…' : 'Salvar cadastro'}</${Botao}>
+    </form>
+    <div class="entrada-links"><button class="link" onClick=${() => sairDaConta()}>Sair</button></div>
+  </div>`;
+}
+
+// Cadastro de antes do CPF ser obrigatório: pede o CPF (e a senha, se a pessoa não acabou de entrar com ela,
+// para já poder trocar a senha pelo CPF).
+function CompletarCpf() {
+  const { cliente } = useLoja();
+  const { dados, erros, setErros, mudarCampo } = useFormulario({ cpf: '', pin: '' });
+  const [enviando, setEnviando] = useState(false);
+  const pedirSenha = !pinDaSessao;
+  const salvar = async (e) => {
+    e.preventDefault();
+    const er = {};
+    if (!cpfValido(dados.cpf || '')) er.cpf = (dados.cpf || '').trim() ? 'CPF inválido. Confira os números.' : 'Digite seu CPF.';
+    if (pedirSenha && dados.pin && !pinValido(dados.pin)) er.pin = 'A senha tem 4 números.';
+    setErros(er);
+    if (Object.keys(er).length) return;
+    setEnviando(true);
+    try {
+      if (pedirSenha && dados.pin) {
+        // confere a senha entrando de novo
+        const sessao = await loja.conta.entrar(cliente.telefone, dados.pin).catch((er2) => {
+          if (er2.code === 'senha-errada') setErros({ pin: 'Senha errada. Confira, ou deixe em branco.' });
+          throw er2;
+        });
+        pinDaSessao = dados.pin;
+        mudar({ sessao });
+      }
+      await salvarCadastro({ ...cliente, cpf: dados.cpf });
+      await gravarRecuperacao(dados.cpf);
+      avisar('CPF salvo');
+    } catch (er2) {
+      console.error(er2);
+      if (loginPerdido(er2)) return sairDaConta('Entre de novo com seu telefone e senha.');
+      if (er2.code !== 'senha-errada') avisar(mensagemDaConta(er2), 'erro');
+    } finally {
+      setEnviando(false);
+    }
+  };
+  return html`<div class="entrada">
+    <${Cabecalho} sub=${'Olá, ' + cliente.nome.split(' ')[0] + '!'} />
+    <form class="formulario" onSubmit=${salvar}>
+      <p style="margin:0">Agora o cadastro precisa do <strong>CPF</strong>. Com ele, você troca a senha sozinho se esquecer.</p>
+      <${CampoCpf} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />
+      ${pedirSenha
+        ? html`<${Texto}
+            rotulo="Sua senha (4 números)"
+            valor=${dados.pin}
+            onChange=${(v) => mudarCampo('pin')(soPin(v))}
+            tipo="password"
+            modo="numeric"
+            erro=${erros.pin}
+            autocomplete="current-password"
+            dica="Para guardar a troca de senha pelo CPF. Se não lembrar, deixe em branco."
+          />`
+        : ''}
+      <${Botao} submit desativado=${enviando}>${enviando ? 'Salvando…' : 'Salvar'}</${Botao}>
     </form>
     <div class="entrada-links"><button class="link" onClick=${() => sairDaConta()}>Sair</button></div>
   </div>`;
@@ -512,31 +652,29 @@ const diasRestritos = (info) => {
   return dias.length && dias.length < 7 ? dias : null;
 };
 
-// Faixa da tela inicial: frete grátis (promoção ou a partir de um valor), valor e dias da entrega.
+// Faixa da tela inicial: só o frete grátis (promoção ou a partir de um valor). O valor da entrega aparece no
+// carrinho, e os dias e o horário, ao finalizar o pedido.
 function AvisoEntrega({ info }) {
-  const dias = diasRestritos(info);
-  const horarios = [
-    horarioDe(info) ? 'entrega ' + textoHorario(horarioDe(info)) : '',
-    horarioDe(info, true) ? 'retirada ' + textoHorario(horarioDe(info, true)) : '',
-  ].filter(Boolean);
-  const quando = html`${dias ? html`<p>Entregas e retiradas ${textoDiasDeEntrega(dias)}.</p>` : ''}${horarios.length ? html`<p>Horário: ${horarios.join('; ')}.</p>` : ''}`;
-  const temQuando = dias || horarios.length;
   const aPartir = freteGratisAPartir(info);
-  if (info.freteGratis) {
-    return html`<div class="faixa ok"><${Icone} nome="gift" /><div class="faixa-corpo">
-      <p><strong>Frete grátis!</strong> Na promoção do sítio, a entrega não é cobrada.</p>${quando}
-    </div></div>`;
-  }
-  if (aPartir) {
-    return html`<div class="faixa ok"><${Icone} nome="gift" /><div class="faixa-corpo">
-      <p><strong>Frete grátis</strong> em pedidos a partir de <strong>${dinheiro(aPartir)}</strong>.</p>
-      <p>Abaixo disso, a entrega é ${dinheiro(info.taxaEntregaCent)}. Retirando no local, não paga entrega.</p>${quando}
-    </div></div>`;
-  }
-  if (!(info.taxaEntregaCent > 0) && !temQuando) return '';
-  return html`<div class="faixa"><${Icone} nome="truck" /><div class="faixa-corpo">
-    ${info.taxaEntregaCent > 0 ? html`<p>Entrega: <strong>${dinheiro(info.taxaEntregaCent)}</strong>. Retirando no local, não paga entrega.</p>` : ''}${quando}
+  if (!info.freteGratis && !aPartir) return '';
+  return html`<div class="faixa ok"><${Icone} nome="gift" /><div class="faixa-corpo">
+    <p>${info.freteGratis
+      ? html`<strong>Frete grátis!</strong> Na promoção do sítio, a entrega não é cobrada.`
+      : html`<strong>Frete grátis</strong> em pedidos a partir de <strong>${dinheiro(aPartir)}</strong>.`}</p>
   </div></div>`;
+}
+
+// Linha do carrinho com a entrega: o valor para o bairro do cliente, ou que ela sai grátis.
+function FreteDoCarrinho({ info, bairro, total }) {
+  const base = taxaDoBairro(info, bairro);
+  if (base === 0 && cobraEntrega(info)) return html`<p class="rodape-frete">Entrega grátis no seu bairro!</p>`;
+  if (!(base > 0)) return '';
+  const aPartir = freteGratisAPartir(info);
+  if (info.freteGratis) return html`<p class="rodape-frete">Entrega grátis (promoção do sítio)!</p>`;
+  if (aPartir && total >= aPartir) return html`<p class="rodape-frete">Entrega grátis neste pedido!</p>`;
+  const nome = bairroDaLista(info, bairro)?.nome || bairro;
+  return html`<p class="rodape-frete neutro">Entrega${nome ? ` (${nome})` : ''}: ${dinheiro(base)}</p>
+    ${aPartir ? html`<p class="rodape-frete">Faltam ${dinheiro(aPartir - total)} para a entrega sair grátis.</p>` : ''}`;
 }
 
 function Catalogo() {
@@ -545,20 +683,19 @@ function Catalogo() {
   const total = totalItens(itens);
   const fechada = info.aberta === false;
   const [vendo, setVendo] = useState(null);
-  const aPartir = freteGratisAPartir(info);
 
   return html`<${Tela}
     titulo="Fazer pedido"
     rodape=${itens.length && !fechada
       ? html`<div>
           <div class="rodape-total"><span>${plural(itens.length, 'item', 'itens')}</span><strong>${dinheiro(total)}</strong></div>
-          ${aPartir ? html`<p class="rodape-frete">${total >= aPartir ? 'Entrega grátis neste pedido!' : `Faltam ${dinheiro(aPartir - total)} para a entrega sair grátis.`}</p>` : ''}
+          <${FreteDoCarrinho} info=${info} bairro=${cliente.bairro} total=${total} />
           <${Botao} icone="chevron-right" href="#/finalizar">Continuar</${Botao}>
         </div>`
       : null}
   >
     <div class="saudacao">
-      <img src="../icons/logo-256.png" alt="" width="56" height="56" />
+      ${cliente.foto ? html`<span class="avatar"><img src=${cliente.foto} alt="" /></span>` : html`<img src="../icons/logo-256.png" alt="" width="56" height="56" />`}
       <div>
         <h2>Olá, ${cliente.nome.split(' ')[0]}!</h2>
         <p>${nomeSitio()}</p>
@@ -665,11 +802,15 @@ function Finalizar() {
   const entregar = entrega === 'entregar';
   const subtotal = totalItens(itens);
   // valor da entrega (nos ajustes do app): grátis na promoção ou a partir do valor do frete grátis
-  const taxaSeEntregar = taxaDaEntrega(info, subtotal);
+  // (o valor do bairro do endereço de entrega)
+  const taxaSeEntregar = taxaDaEntrega(info, subtotal, end.dados.bairro);
   const taxa = entregar ? taxaSeEntregar : 0;
   const total = subtotal + taxa;
   const aPartir = freteGratisAPartir(info);
-  const entregaGratis = entregar && !taxa && (info.taxaEntregaCent > 0 || info.freteGratis);
+  const cobraNoBairro = taxaDoBairro(info, end.dados.bairro) > 0;
+  // "grátis" só faz sentido se o sítio cobra entrega em algum lugar (ou está na promoção)
+  const gratisAqui = !taxaSeEntregar && (cobraEntrega(info) || info.freteGratis);
+  const entregaGratis = entregar && gratisAqui;
   // dias de entrega marcados no app (valem também para retirar): o cliente escolhe uma dessas datas
   // (a primeira já vem marcada)
   // horário marcado no app (um para entregar, outro para retirar): o cliente escolhe a partir de que horas;
@@ -747,21 +888,21 @@ function Finalizar() {
         ${entregaGratis ? html`<li><span>Entrega</span><strong class="positivo">Grátis</strong></li>` : ''}
         <li><strong>Total${semPreco ? ' (sem os itens a combinar)' : ''}</strong><strong>${dinheiro(total)}</strong></li>
       </ul>
-      ${entregar && aPartir && subtotal < aPartir ? html`<p class="campo-dica"><strong>Faltam ${dinheiro(aPartir - subtotal)}</strong> para a entrega sair grátis.</p>` : ''}
+      ${entregar && cobraNoBairro && aPartir && subtotal < aPartir ? html`<p class="campo-dica"><strong>Faltam ${dinheiro(aPartir - subtotal)}</strong> para a entrega sair grátis.</p>` : ''}
       <p class="campo-dica">O sítio confirma o valor final.</p>
     </div>
     <${Segmentado}
       rotulo="Como quer receber?"
       valor=${entrega}
       onChange=${setEntrega}
-      opcoes=${[['entregar', taxaSeEntregar ? `Entregar (${dinheiro(taxaSeEntregar)})` : info.taxaEntregaCent > 0 || info.freteGratis ? 'Entregar (grátis)' : 'Entregar'], ['retirar', 'Retirar no local']]}
+      opcoes=${[['entregar', taxaSeEntregar ? `Entregar (${dinheiro(taxaSeEntregar)})` : gratisAqui ? 'Entregar (grátis)' : 'Entregar'], ['retirar', 'Retirar no local']]}
     />
     ${!entregar ? html`<${CartaoRetirada} info=${info} />` : ''}
     ${entregar && !mudandoEndereco
       ? html`<${CartaoEndereco} rotulo="Entregar em" texto=${enderecoCompleto(end.dados)} referencia=${end.dados.referencia} onMudar=${() => setMudandoEndereco(true)} />`
       : ''}
     ${entregar && mudandoEndereco
-      ? html`<${CamposEndereco} dados=${end.dados} mudarCampo=${end.mudarCampo} erros=${end.erros} cidadeFixa=${CIDADE_ATENDIDA} />
+      ? html`<${CamposEndereco} dados=${end.dados} mudarCampo=${end.mudarCampo} erros=${end.erros} cidadeFixa=${CIDADE_ATENDIDA} bairros=${nomesDosBairros()} />
           <p class="campo-dica" style="margin:0">Este endereço fica salvo no seu cadastro.</p>`
       : ''}
     ${dias
@@ -992,18 +1133,75 @@ function MeuCadastro() {
   };
   const sair = () => confirmar('Sair? Para entrar de novo, use seu telefone e senha.') && sairDaConta();
   return html`<${Tela} titulo="Meu cadastro">
+    <${FotoDePerfil} />
     <form class="formulario" onSubmit=${salvar}>
-      <p class="suave" style="margin:0">Telefone: <strong>${formatarTelefone(cliente.telefone)}</strong></p>
+      <p class="suave" style="margin:0">
+        Telefone: <strong>${formatarTelefone(cliente.telefone)}</strong>
+        ${cliente.cpf ? html`<br />CPF: <strong>${formatarCpf(cliente.cpf)}</strong>` : ''}
+      </p>
       <${Texto} rotulo="Seu nome" valor=${dados.nome} onChange=${mudarCampo('nome')} erro=${erros.nome} autocomplete="name" />
-      <${CampoCpf} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />
-      <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} />
+      ${cliente.cpf ? '' : html`<${CampoCpf} valor=${dados.cpf} onChange=${mudarCampo('cpf')} erro=${erros.cpf} />`}
+      <${CamposEndereco} dados=${dados} mudarCampo=${mudarCampo} erros=${erros} cidadeFixa=${CIDADE_ATENDIDA} bairros=${nomesDosBairros()} />
       <${Botao} submit icone="check" desativado=${enviando}>${enviando ? 'Salvando…' : 'Salvar'}</${Botao}>
     </form>
     <div class="botoes" style="margin-top:22px">
       <${Botao} tipo="secundario" icone="log-out" onClick=${sair}>Sair</${Botao}>
     </div>
-    <p class="campo-dica">Esqueceu a senha? Fale com o sítio para refazer o cadastro.</p>
+    <p class="campo-dica">Esqueceu a senha? Na tela de entrar, toque em “Esqueci a senha” e use o seu CPF. Para mudar o CPF ou o telefone, fale com o sítio.</p>
   </${Tela}>`;
+}
+
+// Iniciais do nome, para quando o cliente não tem foto.
+const iniciais = (nome) =>
+  (nome || '')
+    .split(' ')
+    .filter(Boolean)
+    .map((p) => p[0])
+    .filter((_, i, l) => i === 0 || i === l.length - 1)
+    .join('')
+    .toUpperCase();
+
+// Foto de perfil (opcional): o cliente escolhe da galeria ou tira na hora. Fica pequena, no próprio cadastro.
+function FotoDePerfil() {
+  const { cliente } = useLoja();
+  const arquivo = useRef();
+  const [salvando, setSalvando] = useState(false);
+  const trocarFoto = async (foto) => {
+    setSalvando(true);
+    try {
+      // relê o cadastro antes: o sítio pode ter mudado algo no app enquanto a página estava aberta
+      const atual = await loja.db.ler('cadastros/' + loja.sessao.telefone).catch(() => null);
+      if (atual?.nome && !atual.excluido) mudar({ cliente: { ...atual, id: undefined } });
+      const ok = await salvarCadastro({ ...loja.cliente, foto });
+      if (!ok && foto) avisar('Não deu para guardar a foto agora. Tente de novo mais tarde.', 'erro');
+      else avisar(foto ? 'Foto salva' : 'Foto tirada');
+    } catch (e) {
+      console.error(e);
+      if (loginPerdido(e)) return sairDaConta('Entre de novo com seu telefone e senha.');
+      avisar(mensagemDaConta(e), 'erro');
+    } finally {
+      setSalvando(false);
+    }
+  };
+  const escolher = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      await trocarFoto(await reduzirFoto(f, 320, 60000));
+    } catch (er) {
+      console.error(er);
+      avisar('Não consegui abrir essa foto. Tente outra.', 'erro');
+    }
+  };
+  return html`<div class="perfil">
+    <span class="avatar grande">${cliente.foto ? html`<img src=${cliente.foto} alt="Sua foto" />` : iniciais(cliente.nome)}</span>
+    <div class="perfil-botoes">
+      <button type="button" class="link" onClick=${() => arquivo.current?.click()} disabled=${salvando}>${salvando ? 'Salvando…' : cliente.foto ? 'Trocar foto' : 'Colocar foto de perfil'}</button>
+      ${cliente.foto && !salvando ? html`<button type="button" class="link suave" onClick=${() => confirmar('Tirar sua foto?') && trocarFoto(null)}>Tirar foto</button>` : ''}
+    </div>
+    <input ref=${arquivo} type="file" accept="image/*" style="display:none" onChange=${escolher} aria-label="Escolher foto de perfil" />
+  </div>`;
 }
 
 // ---------- Câmeras ----------
@@ -1069,6 +1267,7 @@ function Pagina() {
     if (lendoCadastro) return html`<div class="carregando">Abrindo seu cadastro…</div>`;
     return html`<${CompletarCadastro} />`;
   }
+  if (!cliente.cpf && ler(CHAVE_CPF_DEPOIS, null) !== cliente.telefone) return html`<${CompletarCpf} />`;
   const [a, b] = rota.partes;
   let tela;
   let comAbas = true;

@@ -3,7 +3,9 @@
 // e ID_DO_PROJETO = demo-sitio).
 // Uso: node tests/e2e-pedidos.mjs http://localhost:8123 pasta-para-prints
 import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
 import { crc16 } from '../js/pix.js';
+import { BAIRROS_DE_CAMPO_NOVO } from '../js/bairros.js';
 const require = createRequire(import.meta.url + '/../../tools/');
 const { chromium, devices } = require('playwright');
 
@@ -21,7 +23,8 @@ const telas = [];
 process.on('uncaughtException', async (e) => {
   console.error(e.message.split('\n')[0]);
   if (prints) for (const [nome, page] of telas) await page.screenshot({ path: `${prints}/falha-${nome}.png` }).catch(() => {});
-  for (const col of ['cadastros', 'clientes']) console.error(col + ': ' + JSON.stringify(await docsDoServidor(col).catch(() => [])));
+  for (const col of ['cadastros', 'clientes']) console.error(col + ': ' + JSON.stringify(await docsDoServidor(col).catch(() => [])).replace(/data:image\/jpeg;base64,[^"]*/g, 'data:image/jpeg…'));
+  console.error(e.stack?.split('\n').find((l) => l.includes('e2e-pedidos')) || '');
   for (const [nome, page] of telas) console.error(nome + ': ' + page.url());
   console.error('ERROS:\n' + erros.join('\n'));
   process.exit(1);
@@ -85,6 +88,29 @@ function rest(token) {
   };
 }
 const anonimo = rest(null);
+// Grava direto no banco, sem passar pelas regras (como administrador do emulador).
+const gravarComoDono = (caminho, dados) =>
+  fetch(`${DOCS}/${caminho}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' }, body: JSON.stringify({ fields: paraFirestore(dados).mapValue.fields }) }).then((r) => r.status);
+const lerComoDono = (caminho) => fetch(`${DOCS}/${caminho}`, { headers: { Authorization: 'Bearer owner' } }).then((r) => r.json()).then((d) => (d.fields ? campos(d.fields) : null));
+// Espera o documento aparecer (ou mudar), por até 10 segundos.
+async function esperarDoc(caminho, pronto = (d) => !!d) {
+  for (let i = 0; i < 40; i++) {
+    const d = await lerComoDono(caminho);
+    if (pronto(d)) return d;
+    await new Promise((ok) => setTimeout(ok, 250));
+  }
+  return lerComoDono(caminho);
+}
+
+// Escolhe o bairro na lista da página; se não estiver nela, usa "Outro bairro" e digita.
+async function escolherBairro(page, nome) {
+  const lista = page.getByLabel(/^Bairro/);
+  const naLista = await lista.locator('option').evaluateAll((os, n) => os.some((o) => o.value === n), nome);
+  if (naLista) return lista.selectOption(nome);
+  await lista.selectOption('__outro');
+  await page.getByLabel('Qual bairro?').fill(nome);
+}
+const FOTO = new URL('../icons/icon-512.png', import.meta.url).pathname;
 
 async function contaDeTeste(email, senha, acao = 'signUp') {
   const r = await fetch(`${AUTH}/identitytoolkit.googleapis.com/v1/accounts:${acao}?key=demo-chave`, {
@@ -169,7 +195,7 @@ passo('dono coloca foto e descrição nos Ovos caipira');
 await dono.page.goto(base + '#/produtos');
 await dono.page.click('text=Ovos caipira');
 await dono.esperar('Colocar foto');
-await dono.page.locator('input[type=file]').setInputFiles(new URL('../icons/icon-512.png', import.meta.url).pathname);
+await dono.page.locator('input[type=file]').setInputFiles(FOTO);
 await dono.page.locator('img.foto-produto').waitFor();
 await dono.esperar('Trocar foto');
 await dono.page.getByLabel('Descrição').fill('Ovos de galinhas soltas.\nBandeja com 30.');
@@ -182,8 +208,13 @@ const ovosNaPagina = (await docsDoServidor('catalogo')).find((d) => d.nome === '
 conferir(fotoOvos?.foto?.startsWith('data:image/jpeg') && fotoOvos.foto.length < 160000 && !('criadoPor' in fotoOvos), 'foto no servidor: ' + (fotoOvos?.foto || '').slice(0, 40) + ' ' + fotoOvos?.foto?.length);
 conferir(ovosNaPagina?.fotoEm && ovosNaPagina.descricao?.startsWith('Ovos de galinhas soltas'), 'foto e descrição no catálogo: ' + JSON.stringify(ovosNaPagina));
 
-passo('dono coloca a chave Pix nos Ajustes');
+passo('dono coloca os dados do sítio e a chave Pix nos Ajustes (aba Sítio)');
 await dono.page.goto(base + '#/ajustes');
+conferir((await dono.page.locator('.abas-topo [role=radio]').allInnerTexts()).join('|') === 'Sítio|Entregas|Despesas|Conta', 'abas dos Ajustes: ' + (await dono.page.locator('.abas-topo [role=radio]').allInnerTexts()));
+await dono.page.getByLabel('Nome do sítio').fill('Granja Longhi');
+await dono.page.getByLabel('Endereço').fill('Estrada do Sítio, km 5, Campo Novo do Parecis - MT');
+await dono.page.getByLabel('CNPJ ou CPF (opcional)').fill('12.345.678/0001-90');
+await dono.page.getByLabel('E-mail ou Instagram (opcional)').fill('@granjalonghi');
 await dono.page.getByLabel('Chave Pix').fill('65 9998');
 await dono.esperar('Não reconheci essa chave');
 await dono.page.getByLabel('Chave Pix').fill('(65) 99984-9257');
@@ -194,6 +225,14 @@ await dono.esperar('Ajustes salvos');
 await dono.page.waitForTimeout(1500);
 const lojaComPix = (await docsDoServidor('catalogo')).find((d) => d.id === '_loja');
 conferir(lojaComPix?.pixChave === '+5565999849257' && lojaComPix.pixTipo === 'celular', 'chave Pix na página: ' + JSON.stringify(lojaComPix));
+const ajustesGerais = await lerComoDono('ajustes/geral');
+conferir(
+  ajustesGerais?.nomeSitio === 'Granja Longhi' && ajustesGerais.enderecoSitio === 'Estrada do Sítio, km 5, Campo Novo do Parecis - MT' && ajustesGerais.documentoSitio === '12.345.678/0001-90' && ajustesGerais.contatoSitio === '@granjalonghi',
+  'dados do sítio nos ajustes: ' + JSON.stringify(ajustesGerais),
+);
+await dono.page.click('.abas-topo >> text=Entregas');
+await dono.esperar('Frete por bairro');
+await dono.foto('ajustes-entregas');
 
 passo('dono abre Entrega e retirada: valor, dias de entrega e o local para retirar');
 await dono.page.click('text=Entrega e retirada');
@@ -227,9 +266,11 @@ passo('dono abre Pedidos, coloca o Mel na página e o WhatsApp do sítio');
 await dono.page.goto(base + '#/mais');
 await dono.page.click('text=Pedidos dos clientes');
 await dono.esperar('Nenhum pedido novo');
-await dono.esperar('/pedido/');
+await dono.esperar('Mandar o link');
+await dono.page.locator('.pedidos-topo', { hasText: 'aberta' }).waitFor();
+conferir((await dono.page.locator('.abas-topo [role=radio]').allInnerTexts()).join('|') === 'Novos|Andamento|Concluídos', 'abas dos pedidos: ' + (await dono.page.locator('.abas-topo [role=radio]').allInnerTexts()));
 await dono.foto('pedidos-vazio');
-await dono.page.click('text=Produtos e ajustes da página');
+await dono.page.click('[aria-label="Produtos e ajustes da página"]');
 await dono.esperar('Produtos que aparecem na página');
 await dono.page.locator('.interruptor-linha', { hasText: 'Mel' }).click();
 await dono.page.getByLabel('WhatsApp do sítio').fill('(19) 97777-6666');
@@ -258,21 +299,27 @@ await cliente.page.click('form >> text=Fazer cadastro');
 await cliente.esperar('Digite seu nome');
 await cliente.esperar('Digite a rua');
 await cliente.esperar('Digite o número');
-await cliente.esperar('Digite o bairro');
+await cliente.esperar('Escolha o bairro.');
+await cliente.esperar('Digite seu CPF.');
 await cliente.esperar('A senha tem 4 números');
+const opcoesBairro = await cliente.page.getByLabel(/^Bairro/).locator('option').allInnerTexts();
+conferir(
+  opcoesBairro.length === BAIRROS_DE_CAMPO_NOVO.length + 2 && opcoesBairro[0] === 'Escolha o bairro' && opcoesBairro.at(-1) === 'Outro bairro (não está na lista)' && opcoesBairro.includes('Centro'),
+  'bairros na página: ' + opcoesBairro.length + ' ' + opcoesBairro.slice(0, 4),
+);
 conferir((await campo('Cidade').inputValue()) === 'Campo Novo do Parecis - MT' && (await campo('Cidade').isDisabled()), 'cidade deveria vir travada');
 await campo('Seu nome').fill('Ana Souza');
 await campo('Telefone (WhatsApp)').fill('(19) 98888-7777');
-await campo('CPF (opcional)').fill('123.456.789-00');
+await cliente.page.getByLabel(/^CPF/).fill('123.456.789-00');
 await cliente.page.getByLabel(/^Rua/).fill('Rua das Flores');
 await cliente.page.getByLabel(/^Número/).fill('10');
-await campo('Bairro').fill('Centro');
+await escolherBairro(cliente.page, 'Centro');
 await campo('Ponto de referência').fill('Portão verde');
 await campo('Crie uma senha').fill('12a345');
 conferir((await campo('Crie uma senha').inputValue()) === '1234', 'a senha deveria aceitar só 4 números');
 await cliente.page.click('form >> text=Fazer cadastro');
 await cliente.esperar('CPF inválido');
-await campo('CPF (opcional)').fill('529.982.247-25');
+await cliente.page.getByLabel(/^CPF/).fill('529.982.247-25');
 await cliente.foto('cadastro');
 await cliente.page.click('form >> text=Fazer cadastro');
 await cliente.esperar('Olá, Ana!');
@@ -282,6 +329,8 @@ conferir(
     && cadastro.cpf === '52998224725' && cadastro.referencia === 'Portão verde',
   'cadastro no servidor: ' + JSON.stringify(cadastro),
 );
+const recuperarAna = await esperarDoc('recuperar/19988887777');
+conferir(recuperarAna?.telefone === '19988887777' && recuperarAna.cifra && recuperarAna.sal && !JSON.stringify(recuperarAna).includes('1234'), 'troca de senha guardada: ' + JSON.stringify(recuperarAna));
 
 passo('o cadastro da Ana aparece em Clientes no app, antes de qualquer pedido');
 await dono.page.goto(base + '#/clientes');
@@ -298,9 +347,8 @@ conferir(ana?.id === 'tel19988887777' && ana.referencia === 'Portão verde' && a
 passo('cliente vê só os produtos escolhidos');
 await cliente.esperar('Ovos caipira');
 await cliente.esperar('R$ 30,00 / ');
-await cliente.esperar('Retirando no local, não paga entrega');
-await cliente.esperar('Entregas e retiradas às quartas e aos sábados');
-await cliente.esperar('Horário: entrega das 08:00 às 12:00; retirada das 14:00 às 18:00.');
+for (const t of ['Retirando no local', 'Entregas e retiradas às', 'Horário: entrega']) conferir(!(await cliente.page.getByText(t).count()), `tela inicial ainda mostra "${t}"`);
+conferir(!(await cliente.page.locator('.faixa.ok').count()), 'sem frete grátis, a tela inicial não deveria ter aviso de entrega');
 await cliente.page.locator('.loja-produto', { hasText: 'Ovos caipira' }).locator('.loja-foto img').waitFor();
 await cliente.esperar('Ovos de galinhas soltas.');
 conferir(!(await cliente.page.locator('.loja-produto', { hasText: 'Mel' }).locator('.loja-foto').count()), 'Mel aparece com foto sem ter');
@@ -312,8 +360,10 @@ await cliente.page.click('.folha >> text=Pronto');
 conferir(!(await cliente.page.locator('text=Queijo').count()), 'cliente vê produto que não foi escolhido');
 const produto = (nome) => cliente.page.locator('.loja-produto', { hasText: nome });
 await produto('Ovos caipira').locator('text=Adicionar').click();
+await cliente.esperar('Entrega (Centro): R$ 5,00');
 await cliente.page.click('[aria-label="Mais Ovos caipira"]');
 await cliente.esperar('R$ 32,00');
+conferir(!(await cliente.page.getByText('para a entrega sair grátis').count()), 'sem frete grátis, não deveria falar em "sair grátis"');
 await cliente.foto('catalogo');
 
 passo('cliente pede para entregar: o endereço já vem do cadastro');
@@ -391,13 +441,20 @@ await dono.page.goto(base + '#/mais');
 await dono.esperar('1 novo');
 await dono.page.click('text=Pedidos dos clientes');
 await dono.esperar('Ana Souza');
+await dono.esperar('Novos (1)');
+await dono.esperar('nº 1 · Entregar ·');
+await dono.esperar('a partir das 10:00');
+await dono.esperar('2 un Ovos caipira');
+await dono.page.locator('.pedido-cabeca', { hasText: 'R$ 37,00' }).waitFor();
+conferir(!(await dono.page.getByText('Rua das Flores').count()) && !(await dono.page.getByText('Recusar').count()), 'pedido fechado deveria mostrar só o resumo');
+await dono.foto('pedido-novo-resumo');
+await dono.page.click('.pedido-cabeca');
 await dono.esperar('Rua das Flores, 10, Centro, Campo Novo do Parecis - MT');
 await dono.esperar('Deixar no portão');
 await dono.esperar('Ponto de referência: Portão verde');
-await dono.esperar('Total estimado: R$ 37,00');
+await dono.page.locator('.itens-pedido li', { hasText: 'Total estimado' }).getByText('R$ 37,00').waitFor();
 await dono.esperar('Pagamento: Pix');
-await dono.esperar('nº 1 ·');
-await dono.esperar('a partir das 10:00');
+await dono.esperar('Recusar');
 conferir(!(await dono.page.locator('.cartao.pedido p.suave', { hasText: 'Horário:' }).count()), 'horário repetido na observação do pedido');
 conferir(!(await dono.page.locator('.cartao.pedido p.suave', { hasText: 'Pagamento:' }).count()), 'forma de pagamento repetida na observação do pedido');
 await dono.foto('pedido-novo');
@@ -417,6 +474,10 @@ conferir(obsDaVenda.includes('Deixar no portão') && !obsDaVenda.includes('Pagam
 await dono.foto('venda-do-pedido');
 await dono.page.click('text=Registrar venda');
 await dono.esperar('Venda registrada. O pedido está em separação.');
+await dono.page.goto(base + '#/pedidos');
+await dono.esperar('Andamento (1)');
+await dono.page.locator('.pedido-resumo', { hasText: 'Ana Souza' }).getByText('Foi entregue').waitFor();
+await dono.foto('pedidos-andamento');
 await dono.page.waitForTimeout(1500);
 let [pedido] = await docsDoServidor('pedidos');
 conferir(pedido?.status === 'confirmado' && pedido.vendaId && pedido.totalCent === 3700 && pedido.entregaCent === 500 && pedido.numero === 1, 'pedido depois da venda: ' + JSON.stringify(pedido));
@@ -509,12 +570,15 @@ const comTroco = (await docsDoServidor('pedidos')).find((p) => p.entrega === 're
 conferir(/^Pagamento: Dinheiro · troco para R\$\s50,00\nHorário: a partir das 14:00$/.test(comTroco?.obs || ''), 'troco e horário no pedido: ' + comTroco?.obs);
 conferir([3, 6].includes(new Date(comTroco?.dataDesejada + 'T12:00').getDay()), 'retirada fora dos dias marcados: ' + comTroco?.dataDesejada);
 await dono.page.goto(base + '#/pedidos');
-await dono.esperar('Vai retirar no local', 15000);
+await dono.esperar('nº 2 · Retirar ·', 15000);
+await dono.page.locator('.pedido-cabeca', { hasText: 'Mel' }).click();
 await dono.esperar('Pagamento: Dinheiro (troco para R$ 50,00)');
 await dono.page.click('text=Recusar');
 await dono.esperar('Pedido recusado');
-await dono.esperar('Últimos 14 dias');
-await dono.foto('pedidos-historico');
+await dono.page.click('.abas-topo >> text=Concluídos');
+await dono.esperar('Pedidos dos últimos 14 dias.');
+await dono.page.locator('.linha', { hasText: 'Não aceito' }).first().waitFor();
+await dono.foto('pedidos-concluidos');
 await cliente.page.click('.abas >> text=Meus pedidos');
 await cliente.esperar('Não aceito');
 await cliente.esperar('Entregue');
@@ -531,6 +595,7 @@ await cliente.page.click('text=Enviar pedido');
 await cliente.esperar('Pedido enviado!');
 await dono.page.goto(base + '#/pedidos');
 await dono.esperar('2 un Mel', 15000);
+await dono.page.click('.pedido-cabeca');
 await dono.esperar('Pagamento: Cartão');
 await dono.page.click('text=Transformar em venda');
 await dono.esperar('Venda do pedido');
@@ -547,6 +612,7 @@ await dono.page.click('text=Registrar venda');
 await dono.esperar('O cliente cancelou este pedido.');
 await dono.page.goto(base + '#/pedidos');
 await dono.esperar('Nenhum pedido novo');
+await dono.page.click('.abas-topo >> text=Concluídos');
 await dono.page.locator('.linha', { hasText: 'Cancelado' }).first().waitFor();
 await dono.foto('pedidos-com-cancelado');
 const cancelado = (await docsDoServidor('pedidos')).find((p) => p.status === 'cancelado');
@@ -563,6 +629,25 @@ await cliente.foto('meus-sem-internet');
 await cliente.ctx.setOffline(false);
 semRede = false;
 conferir(!baixouSdk, 'a página de pedidos baixou o Firebase completo (deveria usar só a API REST)');
+
+passo('cliente coloca foto de perfil no Meu cadastro e o sítio vê no app');
+await cliente.page.click('.abas >> text=Meu cadastro');
+await cliente.esperar('Colocar foto de perfil');
+await cliente.esperar('CPF: 529.982.247-25');
+conferir(!(await cliente.page.getByLabel(/^CPF/).count()), 'com CPF no cadastro, o CPF não deveria ser editável');
+await cliente.page.locator('input[aria-label="Escolher foto de perfil"]').setInputFiles(FOTO);
+await cliente.esperar('Foto salva');
+await cliente.page.locator('.perfil .avatar img').waitFor();
+await cliente.esperar('Trocar foto');
+await cliente.foto('meu-cadastro-com-foto');
+await cliente.page.waitForTimeout(1000);
+[cadastro] = await docsDoServidor('cadastros');
+conferir(cadastro?.foto?.startsWith('data:image/jpeg;base64,') && cadastro.foto.length <= 100000 && cadastro.cpf === '52998224725', 'foto no cadastro: ' + (cadastro?.foto || '').slice(0, 30) + ' ' + cadastro?.foto?.length);
+await cliente.page.click('.abas >> text=Fazer pedido');
+await cliente.page.locator('.avatar img').first().waitFor();
+await dono.page.goto(base + '#/clientes/tel19988887777');
+await dono.page.locator('.perfil .avatar img').waitFor({ timeout: 15000 });
+await dono.foto('cliente-com-foto');
 
 passo('cliente sai; senha errada e telefone já cadastrado não entram');
 const sair = async () => {
@@ -582,9 +667,10 @@ await cliente.foto('senha-errada');
 await cliente.page.click('.entrada-links >> text=Fazer cadastro');
 await campo('Seu nome').fill('Outra Pessoa');
 await campo('Telefone (WhatsApp)').fill('(19) 98888-7777');
+await cliente.page.getByLabel(/^CPF/).fill('390.533.447-05');
 await cliente.page.getByLabel(/^Rua/).fill('Rua X');
 await cliente.page.getByLabel(/^Número/).fill('1');
-await campo('Bairro').fill('B');
+await escolherBairro(cliente.page, 'Bairro Que Não Existe');
 await campo('Crie uma senha').fill('5555');
 await cliente.page.click('form >> text=Fazer cadastro');
 await cliente.esperar('Este telefone já tem cadastro');
@@ -592,11 +678,40 @@ erroEsperado = null;
 [cadastro] = await docsDoServidor('cadastros');
 conferir(cadastro?.nome === 'Ana Souza', 'outra pessoa mudou o cadastro da Ana: ' + JSON.stringify(cadastro));
 
+passo('cliente esqueceu a senha: com o CPF do cadastro, cria uma senha nova');
+await cliente.page.click('text=Já tenho cadastro');
+await cliente.page.click('text=Esqueci a senha');
+await cliente.esperar('Trocar a senha');
+conferir((await cliente.page.getByLabel(/^CPF do cadastro/).inputValue()) === '' && (await campo('Senha nova (4 números)').inputValue()) === '', 'a troca de senha veio com CPF ou senha da tela anterior');
+await campo('Telefone (WhatsApp)').fill('');
+await cliente.page.getByRole('button', { name: 'Trocar a senha' }).click();
+await cliente.esperar('Digite o telefone com DDD.');
+await cliente.esperar('Digite o CPF do seu cadastro.');
+await campo('Telefone (WhatsApp)').fill('(19) 98888-7777');
+await cliente.page.getByLabel(/^CPF do cadastro/).fill('111.444.777-35');
+await campo('Senha nova (4 números)').fill('2580');
+erroEsperado = /CPF errado/;
+await cliente.page.getByRole('button', { name: 'Trocar a senha' }).click();
+await cliente.esperar('O CPF não confere com o cadastro deste telefone.');
+await cliente.esperar('Falar com o sítio');
+await cliente.foto('esqueci-cpf-errado');
+erroEsperado = null;
+await cliente.page.getByLabel(/^CPF do cadastro/).fill('529.982.247-25');
+await cliente.page.getByRole('button', { name: 'Trocar a senha' }).click();
+await cliente.esperar('Senha trocada!', 20000);
+await cliente.esperar('Olá, Ana!');
+await cliente.page.waitForTimeout(1000);
+const recuperarDepois = await esperarDoc('recuperar/19988887777', (d) => d?.cifra !== recuperarAna?.cifra);
+conferir(recuperarDepois?.cifra && recuperarDepois.cifra !== recuperarAna.cifra, 'a troca de senha guardada não foi atualizada com a senha nova');
+conferir(!(await contaDeTeste('19988887777@cliente.demo-sitio.firebaseapp.com', 'sitio-1234', 'signInWithPassword')), 'a senha antiga ainda entra');
+conferir(!!(await contaDeTeste('19988887777@cliente.demo-sitio.firebaseapp.com', 'sitio-2580', 'signInWithPassword')), 'a senha nova não entra');
+await sair();
+
 passo('em outro celular, entra com telefone e senha e o endereço já vem pronto');
 const cliente2 = await aparelho('cliente-outro-celular');
 await cliente2.page.goto(pagina);
 await cliente2.page.getByLabel('Telefone (WhatsApp)').fill('+55 19 98888 7777');
-await cliente2.page.getByLabel('Senha (4 números)').fill('1234');
+await cliente2.page.getByLabel('Senha (4 números)').fill('2580');
 await cliente2.page.click('form >> text=Entrar');
 await cliente2.esperar('Olá, Ana!');
 await cliente2.page.locator('.loja-produto', { hasText: 'Ovos caipira' }).locator('text=Adicionar').click();
@@ -606,7 +721,7 @@ await cliente2.esperar('Rua das Flores, 10, Centro, Campo Novo do Parecis - MT')
 await cliente2.esperar('Portão azul');
 await cliente2.foto('endereco-pronto');
 await cliente2.page.click('text=Mudar endereço');
-await cliente2.page.getByLabel('Bairro').fill('Jardim Novo');
+await escolherBairro(cliente2.page, 'Jardim Novo');
 await cliente2.page.getByRole('radio', { name: 'Dinheiro' }).click();
 await cliente2.page.click('text=Enviar pedido');
 await cliente2.esperar('Pedido enviado!');
@@ -618,6 +733,8 @@ conferir(pedidosAna.some((p) => p.endereco === 'Rua das Flores, 10, Jardim Novo,
 await cliente2.page.click('text=Ver meus pedidos');
 await cliente2.esperar('Não aceito');
 conferir((await cliente2.page.locator('.cartao.pedido').count()) === 4, 'no outro celular deveria ver os 4 pedidos');
+await dono.page.goto(base + '#/pedidos');
+await dono.page.locator('.pedido-cabeca', { hasText: 'Ana Souza' }).locator('.avatar img').waitFor({ timeout: 15000 });
 
 passo('o endereço que a Ana mudou na página aparece no app');
 await dono.page.goto(base + '#/clientes/tel19988887777');
@@ -625,13 +742,13 @@ await dono.esperar('Rua das Flores, 10, Jardim Novo, Campo Novo do Parecis - MT'
 await dono.esperar('Portão azul');
 
 passo('outro cliente não vê os pedidos nem o cadastro da Ana');
-await cliente.page.click('text=Já tenho cadastro');
 await cliente.page.click('.entrada-links >> text=Fazer cadastro');
 await campo('Seu nome').fill('Pedro Lima');
 await campo('Telefone (WhatsApp)').fill('(11) 91111-2222');
+await cliente.page.getByLabel(/^CPF/).fill('111.444.777-35');
 await cliente.page.getByLabel(/^Rua/).fill('Av. Brasil');
 await cliente.page.getByLabel(/^Número/).fill('500');
-await campo('Bairro').fill('Vila Nova');
+await escolherBairro(cliente.page, 'Vila Nova');
 await campo('Crie uma senha').fill('4321');
 await cliente.page.click('form >> text=Fazer cadastro');
 await cliente.esperar('Olá, Pedro!');
@@ -686,13 +803,25 @@ conferir((await pedro.mudarCampos('pedidos/teste1', { status: 'confirmado', atua
 conferir((await pedro.mudarCampos('pedidos/teste1', { status: 'cancelado', totalCent: 1, atualizadoEm: depois })) === 403, 'cliente mudou o total ao cancelar');
 conferir((await pedro.mudarCampos('pedidos/' + umPedido.id, { status: 'cancelado', atualizadoEm: depois })) === 403, 'Pedro cancelou um pedido da Ana');
 conferir((await pedro.mudarCampos('pedidos/teste1', { status: 'cancelado', atualizadoEm: depois })) === 200, 'Pedro não conseguiu cancelar o próprio pedido');
-const anaRest = rest(await contaDeTeste('19988887777@cliente.demo-sitio.firebaseapp.com', 'sitio-1234', 'signInWithPassword'));
+const anaRest = rest(await contaDeTeste('19988887777@cliente.demo-sitio.firebaseapp.com', 'sitio-2580', 'signInWithPassword'));
 const respondido = pedidosAna.find((p) => p.status !== 'novo');
 conferir(respondido && (await anaRest.mudarCampos('pedidos/' + respondido.id, { status: 'cancelado', atualizadoEm: depois })) === 403, 'cliente cancelou pedido que o sítio já respondeu');
 conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', admin: true, criadoEm: 1, atualizadoEm: Date.now() })) === 403, 'cadastro com campo a mais aceito');
 conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', criadoEm: 1, atualizadoEm: 1 })) === 403, 'cadastro com data antiga aceito');
 conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', cpf: '1'.repeat(30), criadoEm: 1, atualizadoEm: Date.now() })) === 403, 'cadastro com CPF enorme aceito');
 conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', numero: 500, criadoEm: 1, atualizadoEm: Date.now() })) === 403, 'cadastro com número que não é texto aceito');
+conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', foto: 'data:image/svg+xml;base64,PHN2Zz4=', criadoEm: 1, atualizadoEm: Date.now() })) === 403, 'cadastro com foto que não é JPEG aceito');
+conferir((await pedro.mudar('cadastros/11911112222', { telefone: '11911112222', nome: 'Pedro Lima', foto: 'data:image/jpeg;base64,' + 'A'.repeat(100000), criadoEm: 1, atualizadoEm: Date.now() })) === 403, 'cadastro com foto enorme aceito');
+conferir((await anonimo.ler('recuperar')) === 403, 'sem login conseguiu listar a troca de senha de todos');
+conferir((await anonimo.ler('recuperar/19988887777')) === 200, 'a troca de senha de um telefone deveria ser lida sem login');
+const trancado = { telefone: '19988887777', sal: 'AAAA', iv: 'AAAA', cifra: 'AAAA', atualizadoEm: Date.now() };
+conferir((await anonimo.mudar('recuperar/19988887777', trancado)) === 403, 'sem login conseguiu trocar a recuperação da Ana');
+conferir((await pedro.mudar('recuperar/19988887777', trancado)) === 403, 'Pedro trocou a recuperação da Ana');
+conferir((await pedro.mudar('recuperar/11911112222', { ...trancado, telefone: '11911112222', extra: 1 })) === 403, 'recuperação com campo a mais aceita');
+conferir((await pedro.mudar('recuperar/11911112222', { ...trancado, telefone: '11911112222' })) === 200, 'Pedro não conseguiu guardar a própria recuperação');
+for (const caminho of ['orcamentos', 'orcamentos/x']) {
+  conferir((await anonimo.ler(caminho)) === 403 && (await pedro.ler(caminho)) === 403, `cliente ou visitante leu ${caminho}`);
+}
 
 passo('dono apaga o Pedro no app: o cadastro da página some e ele preenche de novo');
 await dono.page.goto(base + '#/clientes/' + pedros[0].id + '/editar');
@@ -707,11 +836,38 @@ await cliente.esperar('Complete seu cadastro');
 await cliente.page.getByLabel('Seu nome').fill('Pedro Lima');
 await cliente.page.getByLabel(/^Rua/).fill('Av. Brasil');
 await cliente.page.getByLabel(/^Número/).fill('500');
-await cliente.page.getByLabel('Bairro').fill('Vila Nova');
+await escolherBairro(cliente.page, 'Vila Nova');
+await cliente.page.click('text=Salvar cadastro');
+await cliente.esperar('Digite seu CPF.');
+await cliente.page.getByLabel(/^CPF/).fill('111.444.777-35');
 await cliente.page.click('text=Salvar cadastro');
 await cliente.esperar('Olá, Pedro!');
 await dono.page.goto(base + '#/clientes');
 await dono.esperar('Pedro Lima', 15000);
+
+passo('cadastro antigo, sem CPF: ao entrar, a página pede o CPF');
+await contaDeTeste('11933334444@cliente.demo-sitio.firebaseapp.com', 'sitio-2468');
+conferir(
+  (await gravarComoDono('cadastros/11933334444', { telefone: '11933334444', nome: 'Joana Antiga', endereco: 'Rua Velha', numero: '5', bairro: 'Centro', cidade: 'Campo Novo do Parecis - MT', referencia: null, criadoEm: 1, atualizadoEm: 1 })) === 200,
+  'não consegui criar o cadastro antigo',
+);
+const antiga = await aparelho('cliente-antiga');
+await antiga.page.goto(pagina);
+await antiga.page.getByLabel('Telefone (WhatsApp)').fill('(11) 93333-4444');
+await antiga.page.getByLabel('Senha (4 números)').fill('2468');
+await antiga.page.click('form >> text=Entrar');
+await antiga.esperar('Agora o cadastro precisa do CPF');
+conferir(!(await antiga.page.getByLabel('Sua senha (4 números)').count()), 'acabou de entrar com a senha: não deveria pedir de novo');
+await antiga.page.click('form >> text=Salvar');
+await antiga.esperar('Digite seu CPF.');
+await antiga.page.getByLabel(/^CPF/).fill('123.456.789-09');
+await antiga.foto('pede-cpf');
+await antiga.page.click('form >> text=Salvar');
+await antiga.esperar('CPF salvo');
+await antiga.esperar('Ovos caipira');
+await antiga.page.waitForTimeout(1000);
+conferir((await lerComoDono('cadastros/11933334444'))?.cpf === '12345678909', 'CPF do cadastro antigo: ' + JSON.stringify(await lerComoDono('cadastros/11933334444')));
+conferir(!!(await esperarDoc('recuperar/11933334444'))?.cifra, 'cadastro antigo não guardou a troca de senha pelo CPF');
 
 passo('frete grátis a partir de R$ 40: o cliente vê na tela inicial e não paga a entrega');
 await dono.page.goto(base + '#/pedidos/entrega');
@@ -735,17 +891,63 @@ await cliente.page.click('[aria-label="Menos Mel"]');
 await cliente.page.click('text=Continuar');
 await cliente.esperar('Entregar (R$ 5,00)');
 await cliente.esperar('Faltam R$ 10,00');
+await cliente.page.click('[aria-label="Voltar"]');
+
+passo('frete por bairro: o dono põe R$ 8,00 no bairro do Pedro e o carrinho dele já mostra');
+await dono.page.goto(base + '#/ajustes?aba=entregas');
+await dono.page.click('text=Frete por bairro');
+await dono.esperar('o cliente escolhe o bairro nesta lista');
+if (!BAIRROS_DE_CAMPO_NOVO.includes('Vila Nova')) {
+  await dono.page.getByLabel('Bairro que não está na lista').fill('Vila Nova');
+  await dono.page.click('text=Adicionar bairro');
+  await dono.esperar('Vila Nova entrou na lista');
+}
+await dono.page.getByLabel('Bairro que não está na lista').fill('centro');
+await dono.page.click('text=Adicionar bairro');
+await dono.esperar('Esse bairro já está na lista.');
+await dono.page.getByLabel('Procurar bairro').fill('vila n');
+conferir((await dono.page.locator('.linha-bairro').count()) >= 1 && (await dono.page.locator('.linha-bairro').count()) < 5, 'procurar bairro não filtrou');
+await dono.page.getByLabel('Entrega no Vila Nova', { exact: true }).fill('8');
+await dono.page.getByLabel('Procurar bairro').fill('');
+await dono.page.getByLabel('Entrega no Centro', { exact: true }).fill('0');
+await dono.foto('frete-por-bairro');
+await dono.page.click('.rodape-acao >> text=Salvar');
+await dono.esperar('Frete por bairro salvo');
+await dono.page.waitForTimeout(1500);
+const lojaComBairros = (await docsDoServidor('catalogo')).find((d) => d.id === '_loja');
+const bairroDe = (n) => lojaComBairros?.bairros?.find((b) => b.nome === n);
+conferir(bairroDe('Vila Nova')?.taxaCent === 800 && bairroDe('Centro')?.taxaCent === 0 && lojaComBairros.bairros.filter((b) => b.taxaCent != null).length === 2, 'frete por bairro no servidor: ' + JSON.stringify(lojaComBairros?.bairros?.filter((b) => b.taxaCent != null)));
+await dono.page.goto(base + '#/pedidos/entrega');
+await dono.esperar('2 com valor próprio');
+await cliente.page.goto(pagina);
+await cliente.esperar('Olá, Pedro!');
+await cliente.esperar('Entrega (Vila Nova): R$ 8,00');
+await cliente.esperar('Faltam R$ 10,00 para a entrega sair grátis.');
+await cliente.foto('frete-do-bairro');
+await cliente.page.click('text=Continuar');
+await cliente.esperar('Entregar (R$ 8,00)');
+await cliente.esperar('R$ 38,00');
+passo('no bairro com frete 0, a entrega é grátis');
+await cliente.page.click('text=Mudar endereço');
+await escolherBairro(cliente.page, 'Centro');
+await cliente.esperar('Entregar (grátis)');
+conferir(!(await cliente.page.getByText('para a entrega sair grátis').count()), 'no bairro grátis, não deveria falar em "Faltam"');
+await cliente.foto('bairro-gratis');
+await cliente.page.click('[aria-label="Voltar"]');
+await cliente.page.click('[aria-label="Menos Mel"]');
 
 passo('promoção de frete grátis ligada: vale para qualquer pedido');
 await dono.page.goto(base + '#/pedidos/entrega');
 await dono.page.locator('.interruptor-linha', { hasText: 'Promoção: frete grátis' }).click();
 await dono.page.click('.rodape-acao >> text=Salvar');
 await dono.esperar('Entrega e retirada salvas');
-await dono.page.goto(base + '#/ajustes');
+await dono.page.goto(base + '#/ajustes?aba=entregas');
 await dono.esperar('frete grátis (promoção)');
 await dono.page.waitForTimeout(1500);
 await cliente.page.goto(pagina);
 await cliente.esperar('Frete grátis!');
+await produto('Mel').locator('text=Adicionar').click();
+await cliente.esperar('Entrega grátis (promoção do sítio)!');
 conferir(!(await cliente.page.locator('text=a partir de R$ 40,00').count()), 'na promoção, o valor mínimo não deveria aparecer');
 await cliente.foto('promocao-frete-gratis');
 await cliente.page.click('text=Continuar');
@@ -824,6 +1026,63 @@ await dono.page.waitForTimeout(1500);
 await cliente.page.goto(pagina);
 await cliente.esperar('Olá, Pedro!');
 conferir(!(await cliente.page.locator('.abas >> text=Câmeras').count()), 'sem câmeras, a aba Câmeras não deveria aparecer');
+
+passo('dono faz um orçamento para a Ana, com o logo e os dados do sítio, e manda em PDF');
+await dono.page.goto(base + '#/mais');
+await dono.page.click('text=Orçamentos');
+await dono.esperar('Nenhum orçamento ainda');
+await dono.page.click('text=Fazer orçamento');
+await dono.esperar('Novo orçamento');
+await dono.page.click('text=Salvar orçamento');
+await dono.esperar('Adicione pelo menos um produto.');
+await dono.page.click('.seletor-botao');
+await dono.page.click('.folha >> text=Ana Souza');
+await dono.page.click('.chip-produto >> text=Queijo');
+await dono.page.click('.chip-produto >> text=Mel');
+await dono.page.click('.chip-produto >> text=Mel');
+await dono.page.getByLabel('Entrega (opcional)').fill('5');
+await dono.page.getByLabel('Desconto (opcional)').fill('10');
+await dono.page.getByLabel('Observações (opcional)').fill('Queijo curado, peça de 1 kg.');
+await dono.page.locator('.rodape-total', { hasText: 'R$ 100,00' }).waitFor();
+await dono.foto('orcamento-novo');
+await dono.page.click('text=Salvar orçamento');
+await dono.esperar('Orçamento salvo');
+await dono.esperar('Orçamento nº 1');
+await dono.page.locator('.orcamento-previa img').waitFor();
+await dono.esperar('em aberto');
+await dono.foto('orcamento');
+const [pdfBaixado] = await Promise.all([dono.page.waitForEvent('download'), dono.page.click('text=Mandar em PDF')]);
+const pdf = await readFile(await pdfBaixado.path());
+conferir(pdf.subarray(0, 5).toString() === '%PDF-' && pdf.subarray(-6).toString().includes('%%EOF') && pdfBaixado.suggestedFilename() === 'orcamento-1.pdf', 'PDF do orçamento: ' + pdfBaixado.suggestedFilename() + ' ' + pdf.subarray(0, 8));
+const [jpgBaixado] = await Promise.all([dono.page.waitForEvent('download'), dono.page.click('text=Mandar como imagem')]);
+const jpg = await readFile(await jpgBaixado.path());
+conferir(jpg[0] === 0xff && jpg[1] === 0xd8 && jpgBaixado.suggestedFilename() === 'orcamento-1.jpg', 'imagem do orçamento: ' + jpgBaixado.suggestedFilename());
+if (prints) {
+  await pdfBaixado.saveAs(`${prints}/orcamento-1.pdf`);
+  await jpgBaixado.saveAs(`${prints}/orcamento-1.jpg`);
+}
+const textoZap = decodeURIComponent(await dono.page.locator('a:has-text("Mandar como texto no WhatsApp")').getAttribute('href'));
+conferir(textoZap.startsWith('https://wa.me/5519988887777?text=') && textoZap.includes('*Orçamento nº 1 · Granja Longhi*') && textoZap.includes('*Total: R$ 100,00*') && textoZap.includes('Pix: Celular (65) 99984-9257'), 'texto do orçamento no WhatsApp: ' + textoZap);
+await dono.page.waitForTimeout(1000);
+const [orcamento] = await docsDoServidor('orcamentos');
+conferir(orcamento?.numero === 1 && orcamento.clienteNome === 'Ana Souza' && orcamento.totalCent === 10000 && orcamento.entregaCent === 500 && orcamento.descontoCent === 1000 && orcamento.itens?.length === 2 && !orcamento.vendaId, 'orçamento no servidor: ' + JSON.stringify(orcamento));
+
+passo('a Ana fecha: o orçamento vira venda');
+await dono.page.click('text=Cliente fechou: virar venda');
+await dono.esperar('Venda do orçamento nº 1');
+conferir((await dono.page.locator('.seletor-botao').first().innerText()).includes('Ana Souza'), 'cliente não veio do orçamento');
+conferir((await dono.page.getByLabel('Valor da entrega').inputValue()) === '5,00', 'entrega não veio do orçamento');
+await dono.page.locator('.rodape-total', { hasText: 'R$ 100,00' }).waitFor();
+await dono.foto('venda-do-orcamento');
+await dono.page.click('text=Registrar venda');
+await dono.esperar('Venda registrada');
+await dono.page.goto(base + '#/orcamentos');
+await dono.esperar('virou venda');
+await dono.foto('orcamentos');
+await dono.page.waitForTimeout(1000);
+const [orcamentoFechado] = await docsDoServidor('orcamentos');
+const vendaDoOrcamento = (await docsDoServidor('vendas')).find((v) => v.orcamentoId === orcamentoFechado?.id);
+conferir(orcamentoFechado?.vendaId && vendaDoOrcamento?.id === orcamentoFechado.vendaId && vendaDoOrcamento.totalCent === 10000, 'venda do orçamento: ' + JSON.stringify(vendaDoOrcamento));
 
 passo('dono fecha a página e o cliente vê o aviso');
 await dono.page.goto(base + '#/pedidos/pagina');

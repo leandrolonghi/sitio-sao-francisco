@@ -1,7 +1,7 @@
 // Peças de tela reaproveitadas em todo o app.
 import { html, useState, useEffect, useRef } from './vendor/preact.js';
 import { ICONES } from './vendor/icones.js';
-import { centParaTexto, parseDinheiro, parseQtd, qtd as fmtQtd, contem, hoje } from './util.js';
+import { centParaTexto, parseDinheiro, parseQtd, qtd as fmtQtd, contem, hoje, normalizar } from './util.js';
 import { podeAbrir } from './estado.js';
 
 export function Icone({ nome, tam = 22, classe = '' }) {
@@ -219,18 +219,44 @@ export function Texto({ rotulo, valor, onChange, placeholder, tipo = 'text', dic
 
 // Endereço em partes, igual na página de pedidos e no app. mudarCampo('bairro') devolve o onChange do campo.
 // cidadeFixa: a cidade não muda (ex.: a página de pedidos só entrega numa cidade).
-export function CamposEndereco({ dados, mudarCampo, erros = {}, cidadeFixa }) {
+// bairros: nomes para escolher numa lista (página de pedidos); sem ela, o bairro é digitado.
+export function CamposEndereco({ dados, mudarCampo, erros = {}, cidadeFixa, bairros }) {
   return html`
     <div class="campos-rua">
       <${Texto} rotulo="Rua" valor=${dados.endereco} onChange=${mudarCampo('endereco')} placeholder="Rua das Flores" erro=${erros.endereco} autocomplete="address-line1" />
       <${Texto} rotulo="Número" valor=${dados.numero} onChange=${mudarCampo('numero')} placeholder="10" erro=${erros.numero} />
     </div>
-    <${Texto} rotulo="Bairro" valor=${dados.bairro} onChange=${mudarCampo('bairro')} erro=${erros.bairro} />
+    ${bairros
+      ? html`<${CampoBairro} valor=${dados.bairro} onChange=${mudarCampo('bairro')} bairros=${bairros} erro=${erros.bairro} />`
+      : html`<${Texto} rotulo="Bairro" valor=${dados.bairro} onChange=${mudarCampo('bairro')} erro=${erros.bairro} />`}
     ${cidadeFixa
       ? html`<${Campo} rotulo="Cidade" dica="Por enquanto, o sítio entrega só nesta cidade."><input value=${cidadeFixa} disabled /></${Campo}>`
       : html`<${Texto} rotulo="Cidade" valor=${dados.cidade} onChange=${mudarCampo('cidade')} erro=${erros.cidade} autocomplete="address-level2" />`}
     <${Texto} rotulo="Ponto de referência (opcional)" valor=${dados.referencia} onChange=${mudarCampo('referencia')} placeholder="Ex.: portão verde, perto da igreja" />
   `;
+}
+
+const OUTRO_BAIRRO = '__outro';
+const mesmoNome = (a, b) => normalizar(a).replace(/\s+/g, ' ') === normalizar(b).replace(/\s+/g, ' ');
+
+// Bairro escolhido na lista. Quem mora num bairro que não está nela escolhe "Outro bairro" e digita.
+function CampoBairro({ valor, onChange, bairros, erro }) {
+  const daLista = (valor || '').trim() ? bairros.find((b) => mesmoNome(b, valor)) : null;
+  const [outro, setOutro] = useState(!!(valor || '').trim() && !daLista);
+  const escolher = (e) => {
+    const v = e.target.value;
+    setOutro(v === OUTRO_BAIRRO);
+    onChange(v === OUTRO_BAIRRO ? '' : v);
+  };
+  // div em vez de label: o label com a lista inteira dentro viraria o nome do campo (leitor de tela)
+  return html`<${Campo} div rotulo="Bairro" erro=${outro ? null : erro}>
+      <select value=${outro ? OUTRO_BAIRRO : daLista || ''} onChange=${escolher} aria-label="Bairro">
+        <option value="" disabled>Escolha o bairro</option>
+        ${bairros.map((b) => html`<option value=${b}>${b}</option>`)}
+        <option value=${OUTRO_BAIRRO}>Outro bairro (não está na lista)</option>
+      </select>
+    </${Campo}>
+    ${outro ? html`<${Texto} rotulo="Qual bairro?" valor=${valor} onChange=${onChange} erro=${erro} autoFocus />` : ''}`;
 }
 
 // Endereço já preenchido, com o botão para mudar.
@@ -275,11 +301,11 @@ function useTextoNumerico(valor, paraTexto, ler) {
   return [texto, aoDigitar, aoSair];
 }
 
-export function EntradaDinheiro({ valor, onChange, autoFocus, placeholder = '0,00' }) {
+export function EntradaDinheiro({ valor, onChange, autoFocus, placeholder = '0,00', rotulo }) {
   const [texto, aoDigitar, aoSair] = useTextoNumerico(valor, centParaTexto, parseDinheiro);
   return html`<span class="entrada-dinheiro">
     <span class="prefixo">R$</span>
-    <input inputmode="decimal" value=${texto} placeholder=${placeholder} autoFocus=${autoFocus}
+    <input inputmode="decimal" value=${texto} placeholder=${placeholder} autoFocus=${autoFocus} aria-label=${rotulo}
       onInput=${(e) => aoDigitar(e.target.value, onChange)} onBlur=${aoSair} onFocus=${(e) => e.target.select()} />
   </span>`;
 }

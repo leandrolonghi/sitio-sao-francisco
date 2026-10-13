@@ -1,5 +1,6 @@
 // O que a página de pedidos (clientes) e o app (sítio) combinam entre si.
 import { soDigitos, normalizar, paraData, addDias, linkMapa } from './util.js';
+import { BAIRROS_DE_CAMPO_NOVO } from './bairros.js';
 
 // Documento do catálogo com os dados da página (aberta, WhatsApp do sítio). Os outros são produtos.
 export const INFO_LOJA = '_loja';
@@ -88,15 +89,41 @@ export const valorParaPix = (p) => ((p.itens || []).every((i) => i.precoCent != 
 // taxaEntregaCent, freteGratis (promoção), freteGratisAcimaCent, diasEntrega (0 = domingo … 6 = sábado)
 // e o local de retirada (retiradaEndereco, retiradaLat, retiradaLng).
 
-// Valor da entrega de um pedido: grátis na promoção, ou quando os itens chegam ao valor do frete grátis.
-export function taxaDaEntrega(info, totalItensCent) {
-  if (!(info?.taxaEntregaCent > 0) || info.freteGratis) return 0;
+// ---------- Bairros e frete por bairro ----------
+// O cliente escolhe o bairro numa lista (a cidade é fixa, CIDADE_ATENDIDA). Cada bairro pode ter o seu valor de
+// entrega, que o sítio coloca no app (tela Frete por bairro); fica no _loja: bairros = [{ nome, taxaCent }]
+// (taxaCent null: vale o valor padrão, taxaEntregaCent). Antes de o sítio mexer, vale a lista abaixo.
+export const BAIRROS_PADRAO = BAIRROS_DE_CAMPO_NOVO;
+
+export function bairrosDe(info) {
+  const lista = Array.isArray(info?.bairros) && info.bairros.length ? info.bairros : BAIRROS_PADRAO.map((nome) => ({ nome, taxaCent: null }));
+  return lista.filter((b) => b?.nome);
+}
+
+// O bairro da lista com este nome (o cadastro pode ter "centro" ou "Jd. das Palmeiras" escrito à mão), ou null.
+export function bairroDaLista(info, bairro) {
+  const n = nomeNormal(bairro || '');
+  return n ? bairrosDe(info).find((b) => nomeNormal(b.nome) === n) || null : null;
+}
+
+// Valor da entrega no bairro, sem promoção: o do bairro ou, sem ele, o valor padrão.
+export const taxaDoBairro = (info, bairro) => bairroDaLista(info, bairro)?.taxaCent ?? info?.taxaEntregaCent ?? null;
+
+// Alguma entrega é cobrada (o valor padrão ou o de algum bairro)?
+// O sítio cobra entrega em algum lugar (valor padrão ou de algum bairro)?
+export const cobraEntrega = (info) => info?.taxaEntregaCent > 0 || (Array.isArray(info?.bairros) && info.bairros.some((b) => b?.taxaCent > 0));
+
+// Valor da entrega de um pedido: o do bairro, mas grátis na promoção ou quando os itens chegam ao valor do frete
+// grátis.
+export function taxaDaEntrega(info, totalItensCent, bairro) {
+  const taxa = taxaDoBairro(info, bairro);
+  if (!(taxa > 0) || info.freteGratis) return 0;
   if (info.freteGratisAcimaCent > 0 && totalItensCent >= info.freteGratisAcimaCent) return 0;
-  return info.taxaEntregaCent;
+  return taxa;
 }
 
 // Valor a partir do qual a entrega é grátis (não vale durante a promoção, quando já é grátis).
-export const freteGratisAPartir = (info) => (!info?.freteGratis && info?.taxaEntregaCent > 0 && info.freteGratisAcimaCent > 0 ? info.freteGratisAcimaCent : null);
+export const freteGratisAPartir = (info) => (!info?.freteGratis && cobraEntrega(info) && info.freteGratisAcimaCent > 0 ? info.freteGratisAcimaCent : null);
 
 export const DIAS_DA_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const ORDEM_DA_SEMANA = [1, 2, 3, 4, 5, 6, 0];

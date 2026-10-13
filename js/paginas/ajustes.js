@@ -2,32 +2,112 @@ import { html, useState, useEffect, useRef } from '../vendor/preact.js';
 import { banco, lerDadosLocais, apagarDadosLocais, COLECOES } from '../db.js';
 import { CATEGORIAS_PADRAO } from '../calc.js';
 import { hoje, plural } from '../util.js';
-import { Tela, Secao, Lista, Linha, Botao, Texto, Campo, Interruptor, Vazio, avisar, baixarArquivo, confirmar, ir, trocar } from '../ui.js';
+import { Tela, Secao, Lista, Linha, Botao, Texto, Campo, Interruptor, Vazio, Segmentado, avisar, baixarArquivo, confirmar, ir, trocar } from '../ui.js';
 import { app, mudar, estaInstalado, pode, AREAS } from '../estado.js';
 import { nomeDoSitio, categoriasDespesa } from './comum.js';
 import { Sincronia } from './inicio.js';
 import { infoLoja, salvarPixDaPagina, resumoEntrega } from './pedidos.js';
 import { lerChavePix, descreverChave } from '../pix.js';
+import { textoOuNulo } from '../loja-comum.js';
 import { ouvirMembros, salvarMembro, salvarAreas, removerMembro, mensagemErro } from '../nuvem.js';
 import { VERSAO } from '../versao.js';
 
-export function Ajustes() {
+// Ajustes em abas: Sítio (nome, dados que vão no orçamento, Pix), Entregas (entrega, frete por bairro, página de
+// pedidos), Despesas (categorias) e Conta (login, acesso, cópia de segurança). A aba fica no endereço (?aba=).
+const ABAS = [
+  ['sitio', 'Sítio'],
+  ['entregas', 'Entregas'],
+  ['despesas', 'Despesas'],
+  ['conta', 'Conta'],
+];
+
+export function Ajustes({ query = {} }) {
+  const abas = pode('ajustes') ? ABAS : ABAS.filter(([v]) => v === 'conta');
+  const aba = abas.some(([v]) => v === query.aba) ? query.aba : abas[0][0];
+  return html`<${Tela} titulo="Ajustes" voltarPara="/mais">
+    ${abas.length > 1 ? html`<div class="abas-topo"><${Segmentado} valor=${aba} onChange=${(v) => trocar('/ajustes?aba=' + v)} opcoes=${abas} /></div>` : ''}
+    ${aba === 'sitio' ? html`<${AbaSitio} />` : ''}
+    ${aba === 'entregas' ? html`<${AbaEntregas} />` : ''}
+    ${aba === 'despesas' ? html`<${AbaDespesas} />` : ''}
+    ${aba === 'conta' ? html`<${AbaConta} />` : ''}
+    <p class="centro"><${Sincronia} /></p>
+    <p class="centro suave pequeno">${nomeDoSitio()} · versão ${VERSAO}</p>
+  </${Tela}>`;
+}
+
+// Nome e dados do sítio (aparecem no orçamento) e a chave Pix.
+function AbaSitio() {
   const aj = banco.ajustes();
   const [nome, setNome] = useState(aj.nomeSitio || '');
+  const [telefone, setTelefone] = useState(aj.telefoneSitio || infoLoja().whatsapp || '');
+  const [endereco, setEndereco] = useState(aj.enderecoSitio || '');
+  const [documento, setDocumento] = useState(aj.documentoSitio || '');
+  const [contato, setContato] = useState(aj.contatoSitio || '');
   const [pix, setPix] = useState(aj.chavePix || '');
-  const [cats, setCats] = useState(categoriasDespesa().join('\n'));
-  const [enviando, setEnviando] = useState(false);
-  const arquivo = useRef();
-
   const chavePix = lerChavePix(pix);
 
   const salvar = () => {
-    const categorias = cats.split('\n').map((c) => c.trim()).filter(Boolean);
-    banco.salvar('ajustes', { ...aj, id: 'geral', nomeSitio: nome.trim() || null, chavePix: pix.trim() || null, categorias: categorias.length ? [...new Set(categorias)] : CATEGORIAS_PADRAO });
+    banco.salvar('ajustes', {
+      ...banco.ajustes(),
+      id: 'geral',
+      nomeSitio: nome.trim() || null,
+      telefoneSitio: textoOuNulo(telefone),
+      enderecoSitio: textoOuNulo(endereco),
+      documentoSitio: textoOuNulo(documento),
+      contatoSitio: textoOuNulo(contato),
+      chavePix: pix.trim() || null,
+    });
     salvarPixDaPagina(pix);
     if (pix.trim() && !chavePix) avisar('Ajustes salvos, mas a chave Pix não foi para a página de pedidos: confira a chave.', 'erro');
     else avisar('Ajustes salvos');
   };
+
+  return html`<div class="cartao formulario">
+    <${Texto} rotulo="Nome do sítio" valor=${nome} onChange=${setNome} placeholder="Sítio São Francisco" />
+    <${Texto} rotulo="Telefone / WhatsApp" valor=${telefone} onChange=${setTelefone} tipo="tel" placeholder="(65) 99999-9999" />
+    <${Texto} rotulo="Endereço" valor=${endereco} onChange=${setEndereco} placeholder="Ex.: Estrada do Sítio, km 5, Campo Novo do Parecis - MT" />
+    <${Texto} rotulo="CNPJ ou CPF (opcional)" valor=${documento} onChange=${setDocumento} modo="numeric" />
+    <${Texto} rotulo="E-mail ou Instagram (opcional)" valor=${contato} onChange=${setContato} placeholder="@granjalonghi" />
+    <p class="campo-dica" style="margin-top:-6px">Nome, logo e estes dados aparecem no orçamento.</p>
+    <${Texto}
+      rotulo="Chave Pix"
+      valor=${pix}
+      onChange=${setPix}
+      placeholder="CPF, CNPJ, celular, e-mail ou chave aleatória"
+      erro=${pix.trim() && !chavePix ? 'Não reconheci essa chave. Use CPF, CNPJ, celular com DDD, e-mail ou chave aleatória.' : ''}
+      dica=${chavePix ? `Os clientes pagam para: ${descreverChave(chavePix)}. Aparece na página de pedidos, no orçamento e na mensagem de cobrança.` : 'Aparece na página de pedidos (o cliente copia o código Pix com o valor), no orçamento e na mensagem de cobrança.'}
+    />
+    <${Botao} onClick=${salvar} icone="check">Salvar ajustes</${Botao}>
+  </div>`;
+}
+
+function AbaEntregas() {
+  const info = infoLoja();
+  return html`<${Lista}>
+      <${Linha} icone="truck" titulo="Entrega e retirada" sub=${resumoEntrega(info)} href="#/pedidos/entrega" />
+      <${Linha} icone="map-pin" titulo="Frete por bairro" sub="O valor da entrega em cada bairro" href="#/pedidos/bairros" />
+      ${app.modo === 'nuvem' && pode('pedidos') ? html`<${Linha} icone="shopping-cart" titulo="Página de pedidos" sub="Produtos que aparecem, WhatsApp e câmeras" href="#/pedidos/pagina" />` : ''}
+    </${Lista}>`;
+}
+
+function AbaDespesas() {
+  const [cats, setCats] = useState(categoriasDespesa().join('\n'));
+  const salvar = () => {
+    const categorias = cats.split('\n').map((c) => c.trim()).filter(Boolean);
+    banco.salvar('ajustes', { ...banco.ajustes(), id: 'geral', categorias: categorias.length ? [...new Set(categorias)] : CATEGORIAS_PADRAO });
+    avisar('Categorias salvas');
+  };
+  return html`<div class="cartao formulario">
+    <${Campo} rotulo="Categorias de despesa" dica="Uma por linha">
+      <textarea rows="10" value=${cats} onInput=${(e) => setCats(e.target.value)}></textarea>
+    </${Campo}>
+    <${Botao} onClick=${salvar} icone="check">Salvar categorias</${Botao}>
+  </div>`;
+}
+
+function AbaConta() {
+  const [enviando, setEnviando] = useState(false);
+  const arquivo = useRef();
 
   const baixarBackup = () => {
     const dados = banco.exportar();
@@ -79,7 +159,7 @@ export function Ajustes() {
     // sem armazenamento
   }
 
-  return html`<${Tela} titulo="Ajustes" voltarPara="/mais">
+  return html`
     ${app.modo === 'nuvem'
       ? html`<${Secao} titulo="Sua conta">
           <${Lista}>
@@ -99,53 +179,30 @@ export function Ajustes() {
         </${Secao}>`
       : ''}
 
-    ${pode('ajustes') ? html`<${Secao} titulo="Sítio">
-      <div class="cartao formulario">
-        <${Texto} rotulo="Nome do sítio" valor=${nome} onChange=${setNome} placeholder="Sítio São Francisco" />
-        <${Texto}
-          rotulo="Chave Pix"
-          valor=${pix}
-          onChange=${setPix}
-          placeholder="CPF, CNPJ, celular, e-mail ou chave aleatória"
-          erro=${pix.trim() && !chavePix ? 'Não reconheci essa chave. Use CPF, CNPJ, celular com DDD, e-mail ou chave aleatória.' : ''}
-          dica=${chavePix ? `Os clientes pagam para: ${descreverChave(chavePix)}. Aparece na página de pedidos e na mensagem de cobrança.` : 'Aparece na página de pedidos (o cliente copia o código Pix com o valor) e na mensagem de cobrança.'}
-        />
-        <${Campo} rotulo="Categorias de despesa" dica="Uma por linha">
-          <textarea rows="8" value=${cats} onInput=${(e) => setCats(e.target.value)}></textarea>
-        </${Campo}>
-        <${Botao} onClick=${salvar} icone="check">Salvar ajustes</${Botao}>
-      </div>
-    </${Secao}>
-
-    <${Secao} titulo="Entregas">
-      <${Lista}><${Linha} icone="truck" titulo="Entrega e retirada" sub=${resumoEntrega(infoLoja())} href="#/pedidos/entrega" /></${Lista}>
-    </${Secao}>
-
-    <${Secao} titulo="Cópia de segurança">
-      <div class="cartao">
-        <p style="margin:0 0 12px" class="suave">
-          ${app.modo === 'local'
-            ? 'Os dados estão só neste aparelho. Baixe uma cópia e guarde no iCloud Drive ou mande para você mesmo no WhatsApp.'
-            : 'Os dados já ficam guardados na nuvem. A cópia é uma segurança extra.'}
-          ${ultimoBackup ? ` Última cópia baixada aqui: ${ultimoBackup.split('-').reverse().join('/')}.` : ''}
-        </p>
-        <div class="botoes">
-          <${Botao} tipo="secundario" icone="download" onClick=${baixarBackup}>Baixar cópia de segurança</${Botao}>
-          <${Botao} tipo="secundario" icone="upload" onClick=${() => arquivo.current?.click()}>Restaurar de uma cópia</${Botao}>
-        </div>
-        <input ref=${arquivo} type="file" accept=".json,application/json" style="display:none" onChange=${restaurar} />
-      </div>
-    </${Secao}>` : ''}
+    ${pode('ajustes')
+      ? html`<${Secao} titulo="Cópia de segurança">
+          <div class="cartao">
+            <p style="margin:0 0 12px" class="suave">
+              ${app.modo === 'local'
+                ? 'Os dados estão só neste aparelho. Baixe uma cópia e guarde no iCloud Drive ou mande para você mesmo no WhatsApp.'
+                : 'Os dados já ficam guardados na nuvem. A cópia é uma segurança extra.'}
+              ${ultimoBackup ? ` Última cópia baixada aqui: ${ultimoBackup.split('-').reverse().join('/')}.` : ''}
+            </p>
+            <div class="botoes">
+              <${Botao} tipo="secundario" icone="download" onClick=${baixarBackup}>Baixar cópia de segurança</${Botao}>
+              <${Botao} tipo="secundario" icone="upload" onClick=${() => arquivo.current?.click()}>Restaurar de uma cópia</${Botao}>
+            </div>
+            <input ref=${arquivo} type="file" accept=".json,application/json" style="display:none" onChange=${restaurar} />
+          </div>
+        </${Secao}>`
+      : ''}
 
     ${!estaInstalado()
       ? html`<${Secao} titulo="Instalar no iPhone">
           <div class="cartao"><p style="margin:0">No Safari, toque em <strong>Compartilhar</strong> (quadrado com seta para cima) e depois em <strong>Adicionar à Tela de Início</strong>. O app ganha um ícone e abre em tela cheia.</p></div>
         </${Secao}>`
       : ''}
-
-    <p class="centro"><${Sincronia} /></p>
-    <p class="centro suave pequeno">${nomeDoSitio()} · versão ${VERSAO}</p>
-  </${Tela}>`;
+  `;
 }
 
 // Texto curto com o que um membro pode usar.

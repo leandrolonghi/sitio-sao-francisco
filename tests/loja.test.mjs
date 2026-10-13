@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   telefoneNormal, mesmoTelefone, nomeNormal, emailDoCliente, senhaDoCliente, pinValido, enderecoCompleto, camposEndereco, mesmoEndereco, nomeDoPedido,
   taxaDaEntrega, freteGratisAPartir, diasDeEntrega, textoDiasDeEntrega, proximasEntregas, linkDaRetirada, horarioDe, horariosDe, textoHorario,
-  videoDaCamera, camerasDe, MAX_CAMERAS,
+  videoDaCamera, camerasDe, MAX_CAMERAS, bairrosDe, bairroDaLista, taxaDoBairro, BAIRROS_PADRAO,
 } from '../js/loja-comum.js';
 
 test('telefone sem formatação, sem 55 e sem zero na frente', () => {
@@ -126,4 +126,31 @@ test('câmeras da página: só as que têm link que serve, com nome', () => {
   assert.deepEqual(camerasDe({}), []);
   const muitas = { cameras: Array.from({ length: 9 }, () => ({ nome: 'x', link: 'https://youtu.be/dQw4w9WgXcQ' })) };
   assert.equal(camerasDe(muitas).length, MAX_CAMERAS);
+});
+
+test('frete por bairro: o valor do bairro, o padrão quando não tem, e o frete grátis por cima', () => {
+  const info = { taxaEntregaCent: 500, bairros: [{ nome: 'Centro', taxaCent: 800 }, { nome: 'Jardim das Palmeiras', taxaCent: 0 }, { nome: 'Vila Nova', taxaCent: null }] };
+  assert.equal(taxaDaEntrega(info, 1000, 'Centro'), 800);
+  assert.equal(taxaDaEntrega(info, 1000, '  centro '), 800, 'acha sem acento e sem maiúscula');
+  assert.equal(taxaDaEntrega(info, 1000, 'Jardim das Palmeiras'), 0, 'com 0, o bairro não paga');
+  assert.equal(taxaDaEntrega(info, 1000, 'Vila Nova'), 500, 'em branco, vale o padrão');
+  assert.equal(taxaDaEntrega(info, 1000, 'Bairro que não está na lista'), 500);
+  assert.equal(taxaDaEntrega(info, 1000), 500);
+  assert.equal(taxaDaEntrega({ ...info, freteGratis: true }, 1000, 'Centro'), 0, 'promoção');
+  assert.equal(taxaDaEntrega({ ...info, freteGratisAcimaCent: 4000 }, 4000, 'Centro'), 0, 'chegou no frete grátis');
+  assert.equal(taxaDaEntrega({ ...info, freteGratisAcimaCent: 4000 }, 3999, 'Centro'), 800);
+  assert.equal(freteGratisAPartir({ bairros: [{ nome: 'Centro', taxaCent: 800 }], freteGratisAcimaCent: 4000 }), 4000, 'só bairro cobra: ainda tem frete grátis a partir de');
+  assert.equal(taxaDoBairro(info, 'Centro'), 800);
+  assert.equal(bairroDaLista(info, 'jardim das palmeiras').nome, 'Jardim das Palmeiras');
+  assert.equal(bairroDaLista(info, ''), null);
+});
+
+test('bairros: a lista do app ou, sem ela, a lista padrão de Campo Novo do Parecis', () => {
+  assert.ok(BAIRROS_PADRAO.length >= 1 && BAIRROS_PADRAO.includes('Centro'));
+  assert.deepEqual(bairrosDe({}).map((b) => b.nome), BAIRROS_PADRAO);
+  assert.ok(bairrosDe({}).every((b) => b.taxaCent === null));
+  assert.deepEqual(bairrosDe({ bairros: [{ nome: 'A', taxaCent: 100 }] }), [{ nome: 'A', taxaCent: 100 }]);
+  const ordem = [...BAIRROS_PADRAO].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  assert.deepEqual(BAIRROS_PADRAO, ordem, 'em ordem alfabética');
+  assert.equal(new Set(BAIRROS_PADRAO.map((b) => b.toLowerCase())).size, BAIRROS_PADRAO.length, 'sem repetidos');
 });

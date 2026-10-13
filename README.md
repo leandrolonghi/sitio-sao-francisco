@@ -6,15 +6,20 @@ App de gestão do sítio, feito para usar no celular (iPhone pelo Safari, Androi
 - **A receber (fiado)** por cliente, com data combinada para pagar, aviso do que passou da data, pagamento que quita
   primeiro as vendas mais antigas e cobrança pelo WhatsApp
 - **Entregas**: vendas marcadas para entregar, com o endereço do cadastro do cliente aberto no mapa (ou Waze)
+- **Orçamentos** (em Mais): o sítio monta o orçamento (cliente, produtos, entrega, desconto e validade) e manda
+  ao cliente em **PDF** ou imagem, com o logo e os dados do sítio, ou como texto no WhatsApp; quando o cliente
+  fecha, vira venda com um toque
 - **Página de pedidos** para os clientes: o cliente faz um cadastro e entra com telefone e senha, escolhe os
   produtos e acompanha o pedido; no app o pedido vira venda (e entrega) com um toque. O cadastro do cliente é o
   mesmo na página e em Clientes no app
 - **Foto e descrição dos produtos** (no cadastro do produto): aparecem para os clientes na página de pedidos
 - **Pix no pedido**: o cliente escolhe como vai pagar (Pix, dinheiro ou cartão); no Pix, copia o código
-  "Pix Copia e Cola" com o valor do pedido e cola no app do banco. A chave fica em Ajustes
-- **Entrega e retirada** (em Ajustes): valor da entrega, promoção de frete grátis, frete grátis a partir de um
-  valor, dias da semana em que o sítio entrega, horário de entrega e de retirada e o local de retirada (endereço
-  e ponto no mapa)
+  "Pix Copia e Cola" com o valor do pedido e cola no app do banco. A chave fica em Ajustes › Sítio
+- **Entrega e retirada** (em Ajustes › Entregas): valor da entrega, **frete por bairro**, promoção de frete grátis,
+  frete grátis a partir de um valor, dias da semana em que o sítio entrega, horário de entrega e de retirada e o
+  local de retirada (endereço e ponto no mapa)
+- **Ajustes em abas**: Sítio (nome, telefone, endereço, CNPJ/CPF, contato e Pix, que vão no orçamento), Entregas,
+  Despesas (categorias) e Conta (login, pessoas com acesso, cópia de segurança)
 - **Câmeras ao vivo** (em Pedidos dos clientes → Produtos e ajustes da página): os clientes veem a produção
   em tempo real na aba **Câmeras** da página de pedidos, com a transmissão ao vivo do YouTube (de graça)
 - **Pedidos numerados e acompanhados**: o cliente vê o pedido "Em separação" quando vira venda e "Saiu para
@@ -57,31 +62,51 @@ os dados ficam só no aparelho. Depois de ligar a nuvem, o app oferece enviar es
 ## Página de pedidos dos clientes
 
 Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-francisco/pedido/**
-(no app: **Mais → Pedidos dos clientes → Mandar o link para clientes**).
+(no app: **Mais → Pedidos dos clientes → Mandar o link**).
 
-- O cliente faz um **cadastro** (nome, telefone, CPF opcional, endereço com rua e número separados e uma senha
-  de 4 números) e depois entra com **telefone e senha**: o endereço já vem preenchido no pedido (dá para mudar,
+No app, os pedidos ficam em três abas: **Novos**, **Andamento** (em separação ou saindo para entrega) e
+**Concluídos** (últimos 14 dias). Cada pedido aparece resumido (cliente, valor, quando e itens) com a ação
+principal à mão; tocando, abre telefone, endereço, pagamento, observação e as outras ações. Os produtos e os
+ajustes da página ficam no botão de engrenagem, no alto.
+
+- O cliente faz um **cadastro** (nome, telefone, CPF, endereço com rua, número e bairro e uma senha de 4
+  números) e depois entra com **telefone e senha**: o endereço já vem preenchido no pedido (dá para mudar,
   e o cadastro é atualizado). A cidade é fixa (`CIDADE_ATENDIDA` em `js/loja-comum.js`): por enquanto o sítio só
   entrega em Campo Novo do Parecis - MT. Endereços antigos, com o número junto da rua ("Rua A, 10"), aparecem
   separados na hora.
   Por trás, cada cliente é uma conta de e-mail e senha do Firebase com o e-mail
   `<telefone>@cliente.<projeto>.firebaseapp.com` (ninguém recebe e-mail nesse domínio). O telefone não é
   confirmado por SMS: quem cadastrar um número primeiro fica com ele.
-- **Esqueceu a senha:** o sítio apaga a conta do cliente no console do Firebase (Authentication → Usuários,
-  procurar pelo telefone → Excluir conta) e o cliente faz o cadastro de novo com o mesmo telefone, sem perder
-  os pedidos.
+- O **bairro** é escolhido numa lista (os bairros de Campo Novo do Parecis, os distritos Itanorte e Marechal
+  Rondon e a Zona Rural, em `js/bairros.js`), com "Outro bairro" para digitar. Em **Ajustes › Entregas › Frete
+  por bairro** o sítio põe o valor da entrega de cada bairro (em branco vale o valor padrão; 0 é grátis no
+  bairro), tira e acrescenta bairros. A lista com os valores fica em `_loja.bairros` (`[{ nome, taxaCent }]`) e
+  a página cobra a entrega pelo bairro do endereço (`taxaDoBairro` em `js/loja-comum.js`). O valor aparece no
+  carrinho, embaixo do total; a tela inicial só avisa o frete grátis (promoção ou a partir de um valor).
+- **Esqueceu a senha:** na tela de entrar, **Esqueci a senha** pede o telefone, o CPF do cadastro e a senha
+  nova. Sem servidor: quando o cliente entra ou se cadastra, a página guarda em `recuperar/<telefone>` a senha
+  dele trancada com o CPF (AES-GCM com a chave tirada do CPF por PBKDF2, 150 mil rodadas, `js/recuperar.js`).
+  Na troca, a página destranca a senha antiga com o CPF digitado, entra com ela e põe a nova. Qualquer um lê o
+  documento de um telefone, mas sem o CPF ele não serve. O CPF não é segredo (aparece em notas e cadastros), então
+  quem souber o telefone e o CPF de um cliente consegue trocar a senha dele. Cadastros antigos, sem CPF, pedem o
+  CPF na próxima vez que o cliente entra. Se mesmo assim não der, o sítio apaga a conta do cliente no console do
+  Firebase (Authentication → Usuários, procurar pelo telefone → Excluir conta) e o cliente faz o cadastro de
+  novo com o mesmo telefone, sem perder os pedidos.
+- **Foto de perfil** (opcional): em **Meu cadastro** o cliente escolhe da galeria ou tira na hora. A página
+  reduz a foto (320 pixels, JPEG, até uns 60 KB) e guarda no próprio cadastro (`foto`); o app mostra a foto
+  no cliente e nos pedidos.
 - Quem se cadastra na página aparece em **Clientes** no app (se o sítio já tinha um cliente com o mesmo
   telefone, ele fica ligado a esse, sem repetir). Nome, CPF e endereço são os mesmos dos dois lados: o que o cliente
   muda na página aparece no app, e o que o sítio muda no app aparece na página. O telefone não muda no app (é o
   login do cliente). Apagar o cliente no app apaga também o cadastro da página; na próxima vez, a pessoa preenche
   de novo. Isso fica em `js/cadastros.js`.
-- Os produtos que aparecem são escolhidos em **Pedidos dos clientes → Produtos e ajustes da página** (ou no
-  cadastro do produto). Só vão para a página nome, unidade, preço, descrição e foto. Lá também dá para fechar a página, colocar
-  o WhatsApp do sítio e abrir **Entrega e retirada** (também em **Ajustes**), que fica no documento `_loja` do
+- Os produtos que aparecem são escolhidos em **Pedidos dos clientes → engrenagem (Produtos e ajustes da página)**
+  (ou no cadastro do produto). Só vão para a página nome, unidade, preço, descrição e foto. Lá também dá para fechar a página, colocar
+  o WhatsApp do sítio e abrir **Entrega e retirada** (também em **Ajustes › Entregas**), que fica no documento `_loja` do
   catálogo: valor da entrega (`taxaEntregaCent`), promoção de frete grátis (`freteGratis`), frete grátis a partir
   de um valor dos itens (`freteGratisAcimaCent`, que não conta durante a promoção), dias de entrega
-  (`diasEntrega`, 0 = domingo) e local de retirada (`retiradaEndereco`, `retiradaLat`, `retiradaLng`). A tela
-  inicial da página avisa o frete grátis e os dias; ao finalizar, com dias marcados o cliente só escolhe uma das
+  (`diasEntrega`, 0 = domingo) e local de retirada (`retiradaEndereco`, `retiradaLat`, `retiradaLng`). Ao
+  finalizar, com dias marcados o cliente só escolhe uma das
   próximas datas desses dias, para entregar ou para retirar no local. Com o horário de entrega e o de retirada
   (`entregaDas`/`entregaAte`, `retiradaDas`/`retiradaAte`), o cliente escolhe "a partir das" (de hora em hora,
   dentro do horário; para hoje, só os que não passaram). O horário vai numa linha da observação do pedido
@@ -123,9 +148,21 @@ Endereço para mandar aos clientes: **https://leandrolonghi.github.io/sitio-sao-
   a forma de pagamento, o Pix e o botão de cancelar.
 - Enquanto o sítio não responde, o cliente pode **cancelar o pedido** em Meus pedidos; no app ele sai dos
   pedidos novos e aparece como **Cancelado**. Depois de confirmado ou recusado, só o sítio muda.
-- As regras do banco deixam quem não tem login só ver o catálogo e as fotos. O cliente logado vê e muda só o próprio
-  cadastro, faz pedidos no próprio telefone (conferidos campo a campo) e vê só os pedidos dele. Quem usa o app
-  lê e muda os cadastros.
+- As regras do banco deixam quem não tem login só ver o catálogo e as fotos (e ler a troca de senha de um
+  telefone, sem listar). O cliente logado vê e muda só o próprio cadastro e a própria troca de senha, faz pedidos
+  no próprio telefone (conferidos campo a campo) e vê só os pedidos dele. Quem usa o app lê e muda os cadastros.
+  Sem as regras novas publicadas, a página continua funcionando: o cadastro grava sem número, CPF e foto, e a
+  troca de senha pelo CPF avisa para falar com o sítio.
+
+## Orçamentos
+
+Em **Mais → Orçamentos**: cliente (opcional), data, validade (7 dias, dá para mudar), produtos, entrega,
+desconto e observações. O orçamento ganha um número e abre já pronto para mandar: **Mandar em PDF** e **Mandar
+como imagem** abrem o Compartilhar do celular (WhatsApp, e-mail, salvar em Arquivos); no computador, baixam o
+arquivo. A folha é desenhada no próprio celular (`js/orcamento-arquivo.js`): logo, nome e dados do sítio
+(**Ajustes › Sítio**), número e data, cliente, itens, totais, observações, Pix e validade; o PDF é essa folha
+numa página A4, montado sem biblioteca. **Cliente fechou: virar venda** abre a venda preenchida, e o orçamento
+fica marcado como "virou venda". Os orçamentos ficam na coleção `orcamentos` (precisa das regras novas).
 
 ## Para quem for mexer no código
 
@@ -141,7 +178,10 @@ pedido/index.html, js/loja.js             página de pedidos dos clientes (js/lo
 js/firestore-rest.js                      Firestore pela API REST, usado só pela página de pedidos (leve e rápido)
 js/loja-conta.js                          login dos clientes da página (Firebase Authentication pela API REST)
 js/cadastros.js                           cadastro da página de pedidos ligado ao cliente do app
-js/foto.js                                foto do produto reduzida para guardar no banco
+js/foto.js                                foto do produto (e do perfil do cliente) reduzida para guardar no banco
+js/bairros.js                             lista padrão de bairros de Campo Novo do Parecis
+js/recuperar.js                           troca de senha do cliente pelo CPF (senha trancada com o CPF)
+js/orcamento-arquivo.js                   folha do orçamento (imagem e PDF)
 js/pix.js                                 chave Pix e código Pix Copia e Cola da página de pedidos
 js/db.js                                  dados em memória + gravação local (IndexedDB) ou na nuvem (Firestore)
 js/calc.js                                regras: totais, fiado, estoque, relatórios

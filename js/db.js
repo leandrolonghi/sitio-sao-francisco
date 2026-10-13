@@ -4,11 +4,12 @@
 //  - DriverNuvem: Firebase Firestore, que também guarda uma cópia no aparelho e funciona sem internet
 import { novoId } from './util.js';
 
-export const COLECOES = ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo', 'cadastros', 'fotos'];
+export const COLECOES = ['produtos', 'clientes', 'fornecedores', 'vendas', 'despesas', 'estoque', 'ajustes', 'pedidos', 'catalogo', 'cadastros', 'fotos', 'orcamentos'];
 
-// Ligadas à página de pedidos dos clientes. Precisam das regras novas do Firebase; enquanto elas não
-// forem publicadas, o app segue normal e só a tela de pedidos avisa.
+// Ligadas à página de pedidos dos clientes, e os orçamentos. Precisam das regras novas do Firebase; enquanto
+// elas não forem publicadas, o app segue normal e só a tela de pedidos (ou de orçamentos) avisa.
 const COLECOES_DA_PAGINA = ['pedidos', 'catalogo', 'cadastros', 'fotos'];
+const PRECISAM_REGRAS_NOVAS = [...COLECOES_DA_PAGINA, 'orcamentos'];
 // Os clientes leem estas na página de pedidos: nada de e-mail de quem cadastrou.
 const SEM_AUTOR = ['catalogo', 'cadastros', 'fotos'];
 
@@ -263,7 +264,7 @@ export class DriverNuvem {
             }
           },
           (e) => {
-            if (e.code === 'permission-denied' && COLECOES_DA_PAGINA.includes(col)) {
+            if (e.code === 'permission-denied' && PRECISAM_REGRAS_NOVAS.includes(col)) {
               console.warn(`Sem permissão para ${col}: publique as regras novas do Firestore.`);
               banco.semPermissao.add(col);
               banco.avisar();

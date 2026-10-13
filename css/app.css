@@ -430,6 +430,7 @@ div.linha:active { background: transparent; }
 .campos-horario span { color: var(--texto-suave); font-size: 15px; }
 .campos-horario input { flex: 1; min-width: 0; width: 100%; }
 .rodape-frete { margin: -4px 0 8px; font-size: 14px; color: var(--verde); font-weight: 600; }
+.rodape-frete.neutro { color: var(--texto-suave); }
 .vazio-cartao { width: 100%; text-align: left; color: var(--texto); margin-bottom: 16px; }
 /* câmeras ao vivo na página de pedidos (vídeo do YouTube em 16:9) */
 .camera-video { position: relative; aspect-ratio: 16 / 9; border-radius: var(--raio); overflow: hidden; background: #000; }
@@ -798,3 +799,30 @@ body::before {
   background: var(--topo);
   z-index: 19;
 }
+
+/* frete por bairro (app) */
+.lista-bairros { padding: 4px 14px; }
+.linha-bairro { display: grid; grid-template-columns: 1fr 120px auto; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--borda); }
+.linha-bairro:last-child { border-bottom: 0; }
+.linha-bairro > span { min-width: 0; overflow-wrap: anywhere; }
+.linha-bairro .entrada-dinheiro input { min-height: 40px; }
+
+/* foto de perfil do cliente */
+.avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 56px; height: 56px; border-radius: 50%; overflow: hidden; background: var(--verde-claro); color: var(--verde); font-weight: 700; font-size: 20px; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar.grande { width: 96px; height: 96px; font-size: 34px; }
+.avatar.pequeno { width: 36px; height: 36px; font-size: 14px; }
+.perfil { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+.perfil-botoes { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.perfil-botoes .suave { color: var(--texto-suave); }
+
+/* abas no alto de uma tela (Ajustes, Pedidos) */
+.abas-topo { margin: 0 0 16px; }
+.abas-topo .campo { margin: 0; }
+.pedidos-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 4px 12px; }
+.pedidos-topo button.link { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.abas-topo .segmentado button { font-size: 14px; padding: 6px 4px; }
+.pedido-resumo .pedido-detalhes .botoes:empty { display: none; }
+.pedido-resumo:not(.aberto) .pedido-detalhes .botoes { margin-top: 0; }
+.orcamento-previa { padding: 8px; }
+.orcamento-previa img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--borda); }

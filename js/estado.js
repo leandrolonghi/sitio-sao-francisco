@@ -22,6 +22,7 @@ export const AREAS = [
   { id: 'vendas', nome: 'Vendas', dica: 'Registrar e ver as vendas' },
   { id: 'entregas', nome: 'Entregas', dica: 'Ver o que entregar, abrir o endereço no mapa e marcar como entregue' },
   { id: 'pedidos', nome: 'Pedidos dos clientes', dica: 'Ver os pedidos da página e transformar em venda' },
+  { id: 'orcamentos', nome: 'Orçamentos', dica: 'Fazer orçamentos e mandar aos clientes' },
   { id: 'receber', nome: 'A receber (fiado)', dica: 'Ver quem deve e receber pagamentos' },
   { id: 'despesas', nome: 'Despesas', dica: 'Lançar despesas e contas a pagar' },
   { id: 'estoque', nome: 'Estoque e produção', dica: 'Produção do dia, entradas, perdas e contagem' },
@@ -42,6 +43,7 @@ const AREA_DA_ROTA = {
   vendas: 'vendas',
   entregas: 'entregas',
   pedidos: 'pedidos',
+  orcamentos: 'orcamentos',
   receber: 'receber',
   despesas: 'despesas',
   estoque: 'estoque',
@@ -56,8 +58,8 @@ export function podeAbrir(href, quem = app) {
   if (!href || !href.startsWith('#/')) return true;
   const [a, b, c] = href.slice(2).split('?')[0].split('/');
   if (a === 'ajustes' && b === 'acesso') return quem.modo !== 'nuvem' || quem.papel === 'dono';
-  // entrega e retirada abre pelos Ajustes e pelos Pedidos
-  if (a === 'pedidos' && b === 'entrega') return pode('pedidos', quem) || pode('ajustes', quem);
+  // entrega e retirada (e o frete por bairro) abre pelos Ajustes e pelos Pedidos
+  if (a === 'pedidos' && (b === 'entrega' || b === 'bairros')) return pode('pedidos', quem) || pode('ajustes', quem);
   // a ficha do cliente é onde se recebe o fiado
   if (a === 'clientes' && b && b !== 'novo' && !c && pode('receber', quem)) return true;
   return !AREA_DA_ROTA[a] || pode(AREA_DA_ROTA[a], quem);
